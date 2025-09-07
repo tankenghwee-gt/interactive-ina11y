@@ -1,25 +1,36 @@
-// utils.ts
 // =============================
 // Speech engine
 // =============================
-
 export const speak = (
   text: string,
-  opts?: { interrupt?: boolean; rate?: number; pitch?: number; voice?: SpeechSynthesisVoice | null; onend?: () => void }
+  opts?: {
+    interrupt?: boolean;
+    rate?: number;
+    pitch?: number;
+    voice?: SpeechSynthesisVoice | null;
+    onend?: () => void;
+  }
 ): void => {
-  console.log('hi');
   if (!("speechSynthesis" in window)) return;
-  const { interrupt = true, rate = 1.0, pitch = 1.0, voice = null, onend } = opts || {};
+  const {
+    interrupt = true,
+    rate = 1.0,
+    pitch = 1.0,
+    voice = null,
+    onend,
+  } = opts || {};
   if (interrupt) window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.rate = rate; u.pitch = pitch; if (voice) u.voice = voice; if (onend) u.onend = onend;
+  u.rate = rate;
+  u.pitch = pitch;
+  if (voice) u.voice = voice;
+  if (onend) u.onend = onend;
   window.speechSynthesis.speak(u);
 };
 
 // =============================
 // Types
 // =============================
-
 export interface AccNode {
   el: HTMLElement;
   role: string;
@@ -33,7 +44,6 @@ export interface AccNode {
 // =============================
 // Helpers
 // =============================
-
 const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
 
 const isExposed = (el: HTMLElement): boolean => {
@@ -58,6 +68,25 @@ function hasLabelsProp(
   | HTMLOutputElement {
   return "labels" in el;
 }
+
+const isFocusable = (el: HTMLElement): boolean => {
+  if ((el as HTMLElement).tabIndex >= 0) return true;
+  const t = el.tagName.toLowerCase();
+  if (t === "a" && (el as HTMLAnchorElement).href) return true;
+  if (["button", "input", "select", "textarea"].includes(t)) return true;
+  return false;
+};
+
+// Direct text only (no descendants)
+const getOwnText = (el: HTMLElement): string => {
+  let s = "";
+  el.childNodes.forEach((n) => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      s += (n.textContent || "").replace(/\s+/g, " ");
+    }
+  });
+  return s.trim();
+};
 
 // Roles whose accessible name comes from content (HTML-AAM, simplified)
 const NAME_FROM_CONTENT_ROLES = new Set<string>([
@@ -84,7 +113,7 @@ const NAME_FROM_CONTENT_ROLES = new Set<string>([
   "progressbar",
   "meter",
   "image",
-  "statictext", // inline emphasis text nodes like <strong>, <em>, etc.
+  "statictext",
 ]);
 
 export const computeAccName = (el: HTMLElement): string => {
@@ -95,32 +124,38 @@ export const computeAccName = (el: HTMLElement): string => {
   // 2) aria-labelledby
   const labelledby = el.getAttribute("aria-labelledby");
   if (labelledby) {
-    return collapse(
-      labelledby
-        .split(/\s+/)
-        .map(byIdText)
-        .join(" ")
-    );
+    return collapse(labelledby.split(/\s+/).map(byIdText).join(" "));
   }
 
   // 3) role-specific / native fallbacks
   if (el instanceof HTMLImageElement && el.alt) return el.alt.trim();
 
   if (hasLabelsProp(el) && el.labels && el.labels.length) {
-    return collapse(Array.from(el.labels).map(l => l.textContent || "").join(" "));
+    return collapse(
+      Array.from(el.labels)
+        .map((l) => l.textContent || "")
+        .join(" ")
+    );
   }
 
-  if (el instanceof HTMLInputElement && el.placeholder) return el.placeholder.trim();
-  if (el instanceof HTMLTextAreaElement && el.placeholder) return el.placeholder.trim();
-
-  // 4) name from content only for roles that allow it
+  // 4) role-based content names
   const role = computeRole(el);
-  if (NAME_FROM_CONTENT_ROLES.has(role) || role === "textbox" || role === "combobox") {
-    const t = collapse(el.textContent || "");
-    return t.length > 140 ? `${t.slice(0, 140)}…` : t;
+
+  // Static text: own text only
+  if (role === "statictext") {
+    const own = getOwnText(el);
+    if (own) return own.length > 140 ? `${own.slice(0, 140)}…` : own;
   }
 
-  // Containers generally have no name in the AX tree
+  if (
+    NAME_FROM_CONTENT_ROLES.has(role) ||
+    role === "textbox" ||
+    role === "combobox"
+  ) {
+    const t = collapse(el.textContent || "");
+    if (t) return t.length > 140 ? `${t.slice(0, 140)}…` : t;
+  }
+
   return "";
 };
 
@@ -160,9 +195,21 @@ export const computeRole = (el: HTMLElement): string => {
   if (tag === "meter") return "meter";
   if (tag === "dialog") return "dialog";
 
-  // Inline emphasis → StaticText nodes in AX tree
-  if (tag === "strong" || tag === "b" || tag === "em" || tag === "mark" || tag === "small") {
+  // Inline emphasis → StaticText-ish
+  if (
+    tag === "strong" ||
+    tag === "b" ||
+    tag === "em" ||
+    tag === "mark" ||
+    tag === "small"
+  ) {
     return "statictext";
+  }
+
+  // Fallback: non-focusable containers with own text → statictext
+  if (!isFocusable(el)) {
+    const own = getOwnText(el);
+    if (own) return "statictext";
   }
 
   return "";
@@ -193,14 +240,52 @@ export const computeStates = (el: HTMLElement): string[] => {
   const states: string[] = [];
   const attr = (n: string) => el.getAttribute(n);
 
-  if (attr("aria-disabled") === "true" || (isDisableable(el) && el.disabled)) states.push("disabled");
-  if (attr("aria-checked")) states.push(attr("aria-checked") === "true" ? "checked" : "not checked");
-  if (attr("aria-pressed")) states.push(attr("aria-pressed") === "true" ? "pressed" : "not pressed");
-  if (attr("aria-expanded")) states.push(attr("aria-expanded") === "true" ? "expanded" : "collapsed");
-  if (attr("aria-selected") === "true") states.push("selected");
-  if (attr("aria-required") === "true") states.push("required");
-  if (attr("aria-invalid") === "true") states.push("invalid");
-  if (attr("aria-readonly") === "true") states.push("readonly");
+  // Disabled (ARIA or native)
+  if (
+    attr("aria-disabled") === "true" ||
+    (isDisableable(el) && (el as DisableableElement).disabled)
+  ) {
+    states.push("disabled");
+  }
+
+  // Checked/selected (prefer ARIA, fallback to native)
+  if (attr("aria-checked") !== null) {
+    states.push(attr("aria-checked") === "true" ? "checked" : "unchecked");
+  } else if (
+    el instanceof HTMLInputElement &&
+    (el.type === "checkbox" || el.type === "radio")
+  ) {
+    states.push(el.checked ? "checked" : "unchecked");
+  } else if (el instanceof HTMLOptionElement) {
+    if (el.selected) states.push("selected");
+  }
+
+  // Pressed / expanded (ARIA)
+  if (attr("aria-pressed") !== null) {
+    states.push(attr("aria-pressed") === "true" ? "pressed" : "not pressed");
+  }
+  if (attr("aria-expanded") !== null) {
+    states.push(attr("aria-expanded") === "true" ? "expanded" : "collapsed");
+  }
+
+  // Required (ARIA or native required)
+  if (
+    attr("aria-required") === "true" ||
+    (el instanceof HTMLInputElement && el.required) ||
+    (el instanceof HTMLTextAreaElement && el.required) ||
+    (el instanceof HTMLSelectElement && el.required)
+  ) {
+    states.push("required");
+  }
+
+  // Readonly (ARIA or native)
+  if (
+    attr("aria-readonly") === "true" ||
+    (el instanceof HTMLInputElement && el.readOnly) ||
+    (el instanceof HTMLTextAreaElement && el.readOnly)
+  ) {
+    states.push("readonly");
+  }
 
   return states;
 };
@@ -228,14 +313,19 @@ export const computeValue = (el: HTMLElement): string | undefined => {
   return undefined;
 };
 
-export const computePosInSet = (el: HTMLElement): { pos: number; size: number } | undefined => {
+export const computePosInSet = (
+  el: HTMLElement
+): { pos: number; size: number } | undefined => {
   const pos = Number(el.getAttribute("aria-posinset"));
   const size = Number(el.getAttribute("aria-setsize"));
-  if (Number.isFinite(pos) && Number.isFinite(size) && pos > 0 && size > 0) return { pos, size };
+  if (Number.isFinite(pos) && Number.isFinite(size) && pos > 0 && size > 0)
+    return { pos, size };
   return undefined;
 };
 
-export const computeTableCoords = (el: HTMLElement): { row: number; col: number } | undefined => {
+export const computeTableCoords = (
+  el: HTMLElement
+): { row: number; col: number } | undefined => {
   const cell = el.closest("td,th") as HTMLElement | null;
   if (!cell) return;
   const rowEl = cell.parentElement as HTMLTableRowElement | null;
@@ -250,8 +340,6 @@ export const computeTableCoords = (el: HTMLElement): { row: number; col: number 
 // =============================
 // Collector
 // =============================
-
-// Limit to elements that typically appear in the AX tree
 const CANDIDATE_SELECTOR = [
   // interactive / focusable
   "a[href]",
@@ -260,37 +348,52 @@ const CANDIDATE_SELECTOR = [
   "select",
   "textarea",
   "[tabindex]:not([tabindex='-1'])",
+
   // structure
   "h1,h2,h3,h4,h5,h6",
   "[role]",
   "table,th,td",
+
   // media / graphics
   "img",
+
   // landmarks (native)
   "nav,main,header,footer,aside,form,section[aria-label],section[aria-labelledby]",
+
   // status/info
   "progress,meter,output,dialog,[aria-live]",
-  // inline emphasis → static text nodes
-  "strong,b,em,mark,small"
+
+  // inline emphasis + common text containers
+  "strong,b,em,mark,small,p,span,div",
 ].join(",");
 
 export const collectAccTree = (): AccNode[] => {
   const nodes: AccNode[] = [];
+
   document.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR).forEach((el) => {
     if (!isExposed(el)) return;
     if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return;
 
     const role = computeRole(el);
+
+    // Avoid duplicate static text inside naming controls (link/button)
+    if (
+      role === "statictext" &&
+      el.closest("a[href],button,[role='link'],[role='button']")
+    ) {
+      return;
+    }
+
     const name = computeAccName(el);
     const states = computeStates(el);
     const value = computeValue(el);
     const pos = computePosInSet(el);
     const coords = computeTableCoords(el);
 
-    // Include if it would surface in an accessibility tree
     if (role || name || states.length || value) {
       nodes.push({ el, role, name, states, value, pos, coords });
     }
   });
+
   return nodes;
 };

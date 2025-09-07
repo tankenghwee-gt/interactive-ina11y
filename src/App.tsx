@@ -1,17 +1,18 @@
 import type { JSX } from "react";
-import { ScreenReaderHUD } from "./components/ScreenReaderHUD";
-import Examples from "./components/Example";
-
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import Demo from "./Demo";
 
 // =============================
 // Demo (optional)
 // =============================
 
-export default function DemoPage(): JSX.Element {
+export default function App(): JSX.Element {
   return (
-    <div style={{ padding: 24 }}>
-      <ScreenReaderHUD />
-      <Examples />
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Demo example={"broken"} />} />
+        <Route path="/fixed" element={<Demo example={"fixed"} />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

@@ -1,23 +1,13 @@
 import type { JSX } from "react";
 
-/**
- * Demo form intentionally containing accessibility issues.
- *
- * Showcased WCAG failures:
- * 1) Name, Role, Value (A) — icon-only button without accessible name; custom toggle without ARIA state; unlabeled inputs.
- * 2) Keyboard (A) — clickable "button" built with <div> and onClick only (no keyboard support).
- * 3) Contrast (AA) — “Ghost” buttons and helper text with insufficient contrast.
- * 4) Info and Relationships (A) — visual grouping without semantic grouping/associations; placeholder-as-label pattern.
- * 5) Non-text Content (A) — decorative/meaningful icons lacking alt text/labels.
- */
-export default function A11yIssuesFormDemo(): JSX.Element {
+export default function Example(): JSX.Element {
   return (
     <>
       <div
         style={{
           position: "relative",
-          padding: 24,
-          maxWidth: 860,
+          paddingTop: 100,
+          maxWidth: 400,
           margin: "auto auto",
           fontFamily:
             "system-ui, -apple-system, Segoe UI, Roboto, Inter, 'Helvetica Neue', Arial, sans-serif",
@@ -35,21 +25,16 @@ export default function A11yIssuesFormDemo(): JSX.Element {
           >
             Fill in your information to redeem your CDC vouchers
           </h1>
-          <p style={{ marginTop: 6, color: "#6b7280", fontSize: 14 }}>
-            Use this to demonstrate how “pretty UI” can still be inaccessible.
-          </p>
         </header>
 
         <div
           style={{
-            width: "430px",
+            maxWidth: 400,
             display: "flex",
             flexDirection: "column",
-
             gap: 16,
           }}
         >
-          {/* ===== Left: The form card (looks polished, but broken) ===== */}
           <section
             style={{
               background: "#fff",
@@ -59,109 +44,77 @@ export default function A11yIssuesFormDemo(): JSX.Element {
               padding: 16,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                marginBottom: 14,
-              }}
-            >
-              {/* (5) Non-text Content: Icon-only “logo” without alt/label */}
-              {/* ❌ Non-text Content (A): No alt or aria-label */}
-              <img
-                src="https://via.placeholder.com/28x28"
-                // Intentionally missing alt/aria-label
-                style={{ borderRadius: 6 }}
-              />
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
-                Account Details
-              </h2>
-
-              {/* (1) Name, Role, Value: Icon-only action without accessible name */}
-              {/* ❌ Name, Role, Value (A): No accessible name; screen readers announce nothing useful */}
-              <button
-                // prettier: icon-only, but we omit aria-label on purpose
-                style={{
-                  marginLeft: "auto",
-                  border: 0,
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  background: "#7c3aed",
-                  color: "#fff",
-                  display: "grid",
-                  placeItems: "center",
-                  fontSize: 18,
-                }}
-                title="" // intentionally empty
-              >
-                ☆
-              </button>
-            </div>
-
-            {/* (4) Info & Relationships: Visual “group” with heading, but labels aren’t semantically tied */}
-            {/* ❌ Placeholder-as-label — inputs lack proper <label for=> or aria-labelledby */}
+            {/* ===== Form fields — “pretty” but broken semantics ===== */}
             <div style={{ display: "grid", gap: 12 }}>
+              {/* (4) Info & Relationships (A): placeholder-as-label; no <label> association */}
               <div>
                 <div style={{ marginBottom: 6, fontWeight: 600 }}>Name</div>
-                {/* ❌ No <label htmlFor>, relies on placeholder only */}
                 <input
-                  id="name-input-missing-label"
-                  placeholder="Full name"
+                  id="name-input-missing-label" // id not used by any <label htmlFor>
                   style={inputStyle}
                 />
-                {/* (3) Contrast: help text too low contrast */}
-                {/* ❌ Contrast (AA): ~#9CA3AF on white is borderline; intentionally lighter for demo */}
-                <div style={{ marginTop: 6, fontSize: 12, color: "#b6bcc7" }}>
-                  Your legal name as shown on ID
-                </div>
               </div>
 
+              {/* Another unlabeled input to make failure obvious */}
               <div>
                 <div style={{ marginBottom: 6, fontWeight: 600 }}>
                   Email address
                 </div>
-                {/* ❌ No <label>, again placeholder is used */}
-                <input placeholder="name@example.com" style={inputStyle} />
+                <input style={inputStyle} />
               </div>
 
-              {/* (2) Keyboard: A div that behaves like a button but is mouse-only */}
-              {/* ❌ Keyboard (A): No role, no tabindex, no keyboard handlers */}
-              <div
-                onClick={() => alert("This only works with a mouse click.")}
-                style={ghostBtn}
-              >
-                Mouse-only action
+              <div className="psa">
+                <p>
+                  Please be aware of scam websites that falsely claim to offer
+                  CDC vouchers.
+                </p>
+                <p>
+                  Refer to the infographic below for examples of fake vs real
+                  pages.
+                </p>
               </div>
-
-              {/* Action row */}
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {/* (3) Contrast: low-contrast “ghost” button on white */}
-                {/* ❌ Contrast (AA): insufficient contrast between text/border and background */}
-                <button style={lowContrastBtn}>Save as draft</button>
-                <button style={primaryBtn}>Submit</button>
-
-                {/* Live status (works; you can trigger changes from elsewhere) */}
+              <img
+                src="https://dam.mediacorp.sg/image/upload/s--2MP54hl5--/f_auto,q_auto/v1/mediacorp/cna/image/2025/02/14/scam_spf.png?itok=xTWaFySW"
+                style={{
+                  width: "100%",
+                  borderRadius: 8,
+                  border: "1px solid #e5e7eb",
+                }}
+              />
+              {/* (1) Name/Role/Value (A): “custom toggle” with no role or state */}
+              {/* (1) Name/Role/Value (A): visually styled checkbox without accessible name/role */}
+              <div className="flex items-center gap-2">
                 <div
-                  id="status"
-                  aria-live="polite"
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: 12,
-                    color: "#6b7280",
-                  }}
-                >
-                  {/* Live region text updates go here (intentionally empty by default) */}
-                </div>
+                  // ❌ Fake checkbox: no <input>, no role, no aria-checked
+                  onClick={(e) => e.currentTarget.classList.toggle("checked")}
+                  className="fake-checkbox w-5 h-5 border border-gray-400 bg-white cursor-pointer"
+                />
+                <span className="text-sm text-gray-800">
+                  I agree to receive updates for future CDC Vouchers through
+                  email
+                </span>
               </div>
+              {/* (2) Keyboard (A): mouse-only control — not reachable or activatable by keyboard */}
+              <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                Try activating the button below with keyboard.
+              </p>
+              <div
+                onClick={() =>
+                  alert("Congratulations, you have submitted the form!")
+                }
+                style={ghostBtn}
+                className={"srs-btn--muted"}
+              >
+                Submit
+              </div>
+
+              {/* Actions */}
             </div>
           </section>
         </div>
       </div>
 
-      {/* Styles kept alongside for easy copy-paste; mirrors the HUD aesthetic */}
+      {/* Tiny demo-only styles */}
       <style>{`
         .on {
           background: #7c3aed !important;
@@ -171,12 +124,36 @@ export default function A11yIssuesFormDemo(): JSX.Element {
           transform: translateX(20px) !important;
           background: #fff !important;
         }
+        .fake-checkbox.checked {
+          background: #7c3aed !important;
+          border-color: #7c3aed !important;
+          position: relative;
+        }
+        .fake-checkbox.checked::after {
+          content: "✓";
+          color: white;
+          font-size: 0.8rem;
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+        }
+          .psa p {
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.5;
+  margin-bottom: 1em; /* adds blank line */
+}
+
+.psa p:last-child {
+  margin-bottom: 0; /* avoid extra space at the end */
+}
       `}</style>
     </>
   );
 }
 
-/* ---------- tiny style helpers (inline) ---------- */
+/* ---------- inline style helpers ---------- */
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -189,49 +166,13 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
 };
 
-const switchStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 0,
-  cursor: "pointer",
-  userSelect: "none",
-  padding: 4,
-  border: "1px solid #e5e7eb",
-  borderRadius: 100,
-  width: 52,
-  height: 28,
-  background: "#f9fafb",
-  position: "relative",
-} as const;
-
 const ghostBtn: React.CSSProperties = {
   borderRadius: 10,
   padding: "10px 12px",
   textAlign: "center",
   border: "1px dashed #e5e7eb",
-  background: "#fafafa",
-  color: "#6b7280",
+  background: "#60f5e3ff",
+  color: "#ffffff",
   fontSize: 14,
-  cursor: "pointer", // mouse only (intentionally missing role+tabindex)
+  cursor: "pointer", // mouse only (intentionally missing role+tabindex+key handlers)
 };
-
-const lowContrastBtn: React.CSSProperties = {
-  borderRadius: 10,
-  padding: "10px 14px",
-  background: "#ffffff",
-  border: "1px solid #ebedf0",
-  color: "#9aa3ad", // intentionally too light
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const primaryBtn: React.CSSProperties = {
-  borderRadius: 10,
-  padding: "10px 14px",
-  background: "#7c3aed",
-  border: "1px solid #7c3aed",
-  color: "#fff",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
