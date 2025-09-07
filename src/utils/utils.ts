@@ -1,16 +1,14 @@
+// utils.ts
 // =============================
 // Speech engine
 // =============================
 
-const speak = (
+export const speak = (
   text: string,
   opts?: { interrupt?: boolean; rate?: number; pitch?: number; voice?: SpeechSynthesisVoice | null; onend?: () => void }
 ): void => {
   console.log('hi');
-  if (!("speechSynthesis" in window)) {
-    console.log("no speechSynthesis");
-    return;
-  }
+  if (!("speechSynthesis" in window)) return;
   const { interrupt = true, rate = 1.0, pitch = 1.0, voice = null, onend } = opts || {};
   if (interrupt) window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
@@ -18,37 +16,25 @@ const speak = (
   window.speechSynthesis.speak(u);
 };
 
-/**
- * ScreenReaderSimulator.silktide.tsx
- *
- * A stricter, more SR-like simulator you can drop into any React app.
- * Goals (closer to Silktide + common SR paradigms):
- *  - Virtual cursor in DOM order ("browse mode").
- *  - Rotor with buckets: Headings (by level), Landmarks, Links, Form fields, Tables, Graphics.
- *  - Speech phrases more like SR output: role → name → state → position (n of m), heading levels, table coords.
- *  - Read All from here (continuous), pause/resume, stop.
- *  - Simple Focus Mode toggle (activate controls with Enter/Space when on a control).
- *  - Blackout curtain to simulate no-vision usage.
- *
- * Educational only. Always verify with real NVDA/VoiceOver/TalkBack.
- */
-
 // =============================
-// Types & Utilities
+// Types
 // =============================
 
-type NodeKind = "heading" | "region" | "link" | "control" | "table" | "graphic";
-
-interface NavNode {
+export interface AccNode {
   el: HTMLElement;
-  kind: NodeKind;
-  label: string;
-  meta?: Record<string, string | number | boolean>;
+  role: string;
+  name: string;
+  value?: string;
+  states: string[];
+  pos?: { pos: number; size: number };
+  coords?: { row: number; col: number };
 }
 
-const $$ = (sel: string, root: ParentNode = document): HTMLElement[] => Array.from(root.querySelectorAll(sel)) as HTMLElement[];
-const getText = (el: HTMLElement): string => (el.innerText || el.textContent || "").trim();
-const byIdText = (id: string): string => (document.getElementById(id)?.innerText || "").trim();
+// =============================
+// Helpers
+// =============================
+
+const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
 
 const isExposed = (el: HTMLElement): boolean => {
   const style = getComputedStyle(el);
@@ -58,139 +44,253 @@ const isExposed = (el: HTMLElement): boolean => {
   return true;
 };
 
-// Type guards
-function hasLabels(el: Element): el is HTMLInputElement | HTMLSelectElement | HTMLMeterElement | HTMLProgressElement | HTMLOutputElement {
-  return "labels" in el && (el as HTMLInputElement).labels !== undefined;
-}
-function isFormControl(el: Element): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement {
-  return el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement || el instanceof HTMLButtonElement;
+const byIdText = (id: string): string =>
+  document.getElementById(id)?.textContent?.trim() || "";
+
+function hasLabelsProp(
+  el: Element
+): el is
+  | HTMLInputElement
+  | HTMLSelectElement
+  | HTMLTextAreaElement
+  | HTMLMeterElement
+  | HTMLProgressElement
+  | HTMLOutputElement {
+  return "labels" in el;
 }
 
-const accName = (el: HTMLElement): string => {
+// Roles whose accessible name comes from content (HTML-AAM, simplified)
+const NAME_FROM_CONTENT_ROLES = new Set<string>([
+  "button",
+  "link",
+  "heading",
+  "tab",
+  "menuitem",
+  "option",
+  "treeitem",
+  "listitem",
+  "cell",
+  "gridcell",
+  "columnheader",
+  "rowheader",
+  "tooltip",
+  "switch",
+  "checkbox",
+  "radio button",
+  "dialog",
+  "alert",
+  "alertdialog",
+  "status",
+  "progressbar",
+  "meter",
+  "image",
+  "statictext", // inline emphasis text nodes like <strong>, <em>, etc.
+]);
+
+export const computeAccName = (el: HTMLElement): string => {
+  // 1) aria-label
   const ariaLabel = el.getAttribute("aria-label");
   if (ariaLabel) return ariaLabel.trim();
-  const ariaLabelledby = el.getAttribute("aria-labelledby");
-  if (ariaLabelledby) {
-    const ids = ariaLabelledby.split(/\s+/).filter(Boolean);
-    const fromIds = ids.map(byIdText).join(" ").trim();
-    if (fromIds) return fromIds;
+
+  // 2) aria-labelledby
+  const labelledby = el.getAttribute("aria-labelledby");
+  if (labelledby) {
+    return collapse(
+      labelledby
+        .split(/\s+/)
+        .map(byIdText)
+        .join(" ")
+    );
   }
-  if (hasLabels(el)) {
-    const list = el.labels ? Array.from(el.labels) : [];
-    const s = list.map((l) => getText(l)).join(" ").trim();
-    if (s) return s;
-  }
+
+  // 3) role-specific / native fallbacks
   if (el instanceof HTMLImageElement && el.alt) return el.alt.trim();
-  const txt = getText(el);
-  if (txt) return txt;
+
+  if (hasLabelsProp(el) && el.labels && el.labels.length) {
+    return collapse(Array.from(el.labels).map(l => l.textContent || "").join(" "));
+  }
+
   if (el instanceof HTMLInputElement && el.placeholder) return el.placeholder.trim();
   if (el instanceof HTMLTextAreaElement && el.placeholder) return el.placeholder.trim();
+
+  // 4) name from content only for roles that allow it
+  const role = computeRole(el);
+  if (NAME_FROM_CONTENT_ROLES.has(role) || role === "textbox" || role === "combobox") {
+    const t = collapse(el.textContent || "");
+    return t.length > 140 ? `${t.slice(0, 140)}…` : t;
+  }
+
+  // Containers generally have no name in the AX tree
   return "";
 };
 
-const headingLevel = (el: HTMLElement): number | null => {
-  if (/^H[1-6]$/.test(el.tagName)) return parseInt(el.tagName[1] || "", 10) || 1;
-  if (el.getAttribute("role") === "heading") {
-    const lvl = parseInt(el.getAttribute("aria-level") || "", 10);
-    return Number.isFinite(lvl) ? lvl : 2;
-  }
-  return null;
-};
-
-const roleOf = (el: HTMLElement): string => {
+export const computeRole = (el: HTMLElement): string => {
   const explicit = el.getAttribute("role");
-  if (explicit) return explicit;
-  if (el.matches("a")) return "link";
-  if (el.matches("button")) return "button";
-  if (el.matches("img")) return "graphic";
-  if (el.matches("input[type='checkbox']")) return "checkbox";
-  if (el.matches("input,select,textarea")) return "form field";
-  if (el.matches("table")) return "table";
-  if (el.matches("[type='submit']")) return "button";
-  return el.tagName.toLowerCase();
-};
+  if (explicit) return explicit.toLowerCase();
 
-const stateOf = (el: HTMLElement): string => {
-  const attr = (n: string) => el.getAttribute(n);
-  if (attr("aria-pressed") === "true") return "pressed";
-  if (attr("aria-checked") === "true") return "checked";
-  if (isFormControl(el)) {
-    if (el instanceof HTMLInputElement && el.type === "checkbox" && el.checked) return "checked";
-    if (el.disabled) return "disabled";
+  const tag = el.tagName.toLowerCase();
+  if (tag === "a" && (el as HTMLAnchorElement).href) return "link";
+  if (tag === "button") return "button";
+  if (/^h[1-6]$/.test(tag)) return "heading";
+  if (tag === "img") return "image";
+
+  if (tag === "input") {
+    const t = (el as HTMLInputElement).type;
+    if (t === "checkbox") return "checkbox";
+    if (t === "radio") return "radio button";
+    if (t === "range") return "slider";
+    if (t === "number") return "spinbutton";
+    return "textbox";
   }
-  if (attr("aria-disabled") === "true") return "disabled";
-  if (attr("aria-expanded") === "true") return "expanded";
-  if (attr("aria-expanded") === "false") return "collapsed";
+
+  if (tag === "textarea") return "textbox";
+  if (tag === "select") return "combobox";
+  if (tag === "table") return "table";
+
+  // Landmarks (native)
+  if (tag === "nav") return "navigation";
+  if (tag === "main") return "main";
+  if (tag === "header") return "banner";
+  if (tag === "footer") return "contentinfo";
+  if (tag === "aside") return "complementary";
+  if (tag === "form") return "form";
+
+  // Status/info widgets
+  if (tag === "progress") return "progressbar";
+  if (tag === "meter") return "meter";
+  if (tag === "dialog") return "dialog";
+
+  // Inline emphasis → StaticText nodes in AX tree
+  if (tag === "strong" || tag === "b" || tag === "em" || tag === "mark" || tag === "small") {
+    return "statictext";
+  }
+
   return "";
 };
 
-const tableCoords = (el: HTMLElement): { row: number; col: number } | null => {
+type DisableableElement =
+  | HTMLButtonElement
+  | HTMLInputElement
+  | HTMLSelectElement
+  | HTMLTextAreaElement
+  | HTMLOptGroupElement
+  | HTMLOptionElement
+  | HTMLFieldSetElement;
+
+function isDisableable(el: Element): el is DisableableElement {
+  return (
+    el instanceof HTMLButtonElement ||
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLSelectElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLOptGroupElement ||
+    el instanceof HTMLOptionElement ||
+    el instanceof HTMLFieldSetElement
+  );
+}
+
+export const computeStates = (el: HTMLElement): string[] => {
+  const states: string[] = [];
+  const attr = (n: string) => el.getAttribute(n);
+
+  if (attr("aria-disabled") === "true" || (isDisableable(el) && el.disabled)) states.push("disabled");
+  if (attr("aria-checked")) states.push(attr("aria-checked") === "true" ? "checked" : "not checked");
+  if (attr("aria-pressed")) states.push(attr("aria-pressed") === "true" ? "pressed" : "not pressed");
+  if (attr("aria-expanded")) states.push(attr("aria-expanded") === "true" ? "expanded" : "collapsed");
+  if (attr("aria-selected") === "true") states.push("selected");
+  if (attr("aria-required") === "true") states.push("required");
+  if (attr("aria-invalid") === "true") states.push("invalid");
+  if (attr("aria-readonly") === "true") states.push("readonly");
+
+  return states;
+};
+
+export const computeValue = (el: HTMLElement): string | undefined => {
+  const now = el.getAttribute("aria-valuenow");
+  const min = el.getAttribute("aria-valuemin");
+  const max = el.getAttribute("aria-valuemax");
+
+  if (now !== null) {
+    if (min !== null && max !== null) return `${now}, range ${min} to ${max}`;
+    if (max !== null) return `${now} of ${max}`;
+    return now || undefined;
+  }
+
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    return el.value || undefined;
+  }
+
+  if (el instanceof HTMLProgressElement) {
+    const pct = (Number(el.value) / Number(el.max || 1)) * 100;
+    return `${Math.round(pct)}%`;
+  }
+
+  return undefined;
+};
+
+export const computePosInSet = (el: HTMLElement): { pos: number; size: number } | undefined => {
+  const pos = Number(el.getAttribute("aria-posinset"));
+  const size = Number(el.getAttribute("aria-setsize"));
+  if (Number.isFinite(pos) && Number.isFinite(size) && pos > 0 && size > 0) return { pos, size };
+  return undefined;
+};
+
+export const computeTableCoords = (el: HTMLElement): { row: number; col: number } | undefined => {
   const cell = el.closest("td,th") as HTMLElement | null;
-  if (!cell) return null;
+  if (!cell) return;
   const rowEl = cell.parentElement as HTMLTableRowElement | null;
-  if (!rowEl) return null;
-  const table = rowEl.closest("table") as HTMLTableElement | null;
-  if (!table) return null;
+  if (!rowEl) return;
+  const table = rowEl.closest("table,[role='grid']") as HTMLTableElement | null;
+  if (!table) return;
   const row = Array.from(table.rows).indexOf(rowEl) + 1;
   const col = Array.from(rowEl.children).indexOf(cell) + 1;
   return { row, col };
 };
 
-const collectNavigables = (): NavNode[] => {
-  const res: NavNode[] = [];
+// =============================
+// Collector
+// =============================
 
-  // Regions/Landmarks
-  $$("header,nav,main,aside,footer,[role='banner'],[role='navigation'],[role='main'],[role='complementary'],[role='contentinfo'],section[aria-label],section[aria-labelledby]")
-    .filter(isExposed)
-    .forEach((el) => res.push({ el, kind: "region", label: accName(el) || el.getAttribute("aria-label") || roleOf(el) }));
+// Limit to elements that typically appear in the AX tree
+const CANDIDATE_SELECTOR = [
+  // interactive / focusable
+  "a[href]",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "[tabindex]:not([tabindex='-1'])",
+  // structure
+  "h1,h2,h3,h4,h5,h6",
+  "[role]",
+  "table,th,td",
+  // media / graphics
+  "img",
+  // landmarks (native)
+  "nav,main,header,footer,aside,form,section[aria-label],section[aria-labelledby]",
+  // status/info
+  "progress,meter,output,dialog,[aria-live]",
+  // inline emphasis → static text nodes
+  "strong,b,em,mark,small"
+].join(",");
 
-  // Headings
-  $$("h1,h2,h3,h4,h5,h6,[role='heading']")
-    .filter(isExposed)
-    .forEach((el) => res.push({ el, kind: "heading", label: accName(el) || getText(el), meta: { level: headingLevel(el) || 2 } }));
+export const collectAccTree = (): AccNode[] => {
+  const nodes: AccNode[] = [];
+  document.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR).forEach((el) => {
+    if (!isExposed(el)) return;
+    if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return;
 
-  // Links
-  $$("a[href], [role='link']").filter(isExposed).forEach((el) => res.push({ el, kind: "link", label: accName(el) || getText(el) || (el.getAttribute("href") || "(link)") }));
+    const role = computeRole(el);
+    const name = computeAccName(el);
+    const states = computeStates(el);
+    const value = computeValue(el);
+    const pos = computePosInSet(el);
+    const coords = computeTableCoords(el);
 
-  // Controls (buttons + inputs)
-  $$("button,input,select,textarea,[role='button']").filter(isExposed).forEach((el) => res.push({ el, kind: "control", label: accName(el) || getText(el) || (el.getAttribute("name") || el.id || "(control)") }));
-
-  // Tables
-  $$("table").filter(isExposed).forEach((el) => res.push({ el, kind: "table", label: accName(el) || el.getAttribute("summary") || "table" }));
-
-  // Graphics
-  $$("img,[role='img']").filter(isExposed).forEach((el) => res.push({ el, kind: "graphic", label: accName(el) || "graphic" }));
-
-  // Keep DOM order
-  res.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
-  return res;
-};
-
-
-interface ScreenReaderSimulatorOptions {
-  curtain?: boolean;
-  lang?: string; // e.g. "en-GB"
-  initialFilter?: NodeKind | "all";
-}
-
-
-export type {
-    ScreenReaderSimulatorOptions,
-    NavNode,
-    NodeKind
-}
-
-export {
-    stateOf,
-    tableCoords,
-    collectNavigables,
-    hasLabels,
-    isFormControl,
-    accName,
-    isExposed,
-    getText,
-    byIdText,
-    speak,
-    roleOf,
-    headingLevel
+    // Include if it would surface in an accessibility tree
+    if (role || name || states.length || value) {
+      nodes.push({ el, role, name, states, value, pos, coords });
+    }
+  });
+  return nodes;
 };

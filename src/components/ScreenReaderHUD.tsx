@@ -1,87 +1,86 @@
 // =============================
-// Silktide-style Minimal HUD
+// Silktide-style Minimal HUD (AX-tree version)
 // =============================
 
 import type { JSX } from "react";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useScreenReaderSimulator } from "../hooks/useScreenReaderSimulator";
-import { roleOf, stateOf, headingLevel, tableCoords } from "../utils/utils";
 
 export function ScreenReaderHUD(): JSX.Element | null {
   const {
-    state: { nav, index, hudOpen },
-    actions: { rescan, focusAt, setHudOpen },
+    state: { nodes, index, muted },
+    actions: { focusNext, focusPrev, setMuted },
   } = useScreenReaderSimulator({ lang: "en-US" });
 
   // Local HUD-only state
-  const [muted, setMuted] = useState(false);
+  const [hudOpen, setHudOpen] = useState(true);
   const [log, setLog] = useState<string[]>([]);
 
-  // Build a compact, SR-like announcement for the current node (for HUD narration only)
+  // Build a compact, SR-like announcement for the current node (HUD narration)
   const currentAnnouncement = useMemo(() => {
-    const node = nav[index];
+    const node = nodes[index];
     if (!node) return "";
-    const parts: string[] = [];
 
-    if (node.kind === "heading") {
-      const lvl = (node.meta?.level as number) || headingLevel(node.el) || 2;
-      if (node.label) parts.push(`"${node.label}"`);
-      parts.push(`Heading level ${lvl}`);
-    } else if (node.kind === "link") {
-      parts.push("Link");
-      if (node.label) parts.push(`- ${node.label}`);
-    } else if (node.kind === "table") {
-      const rows = (node.el as HTMLTableElement).rows?.length || 0;
-      parts.push("Table");
-      if (node.label) parts.push(`- ${node.label}`);
-      if (rows) parts.push(`- ${rows} rows`);
-    } else if (node.kind === "graphic") {
-      parts.push("Graphic");
-      if (node.label) parts.push(`- ${node.label}`);
-    } else if (node.kind === "region") {
-      parts.push("Landmark region");
-      if (node.label) parts.push(`- ${node.label}`);
-    } else {
-      // controls / others
-      const role = roleOf(node.el);
-      const st = stateOf(node.el);
-      parts.push(role ? role[0].toUpperCase() + role.slice(1) : "Control");
-      if (node.label) parts.push(`- ${node.label}`);
-      if (st) parts.push(`- ${st}`);
-      const coords = tableCoords(node.el);
-      if (coords) parts.push(`- row ${coords.row}, col ${coords.col}`);
+    const parts: string[] = [];
+    if (node.name) parts.push(`"${node.name}"`);
+    if (node.role) {
+      // Heading level if present
+      if (node.role === "heading") {
+        // try aria-level; fallback to native hN if available
+        const levelAttr = node.el.getAttribute("aria-level");
+        let level: number | undefined;
+        if (levelAttr) {
+          const n = parseInt(levelAttr, 10);
+          if (Number.isFinite(n)) level = n;
+        } else {
+          const t = node.el.tagName.toLowerCase();
+          if (/^h[1-6]$/.test(t)) level = parseInt(t[1]!, 10);
+        }
+        parts.push(`Heading${level ? ` level ${level}` : ""}`);
+      } else {
+        parts.push(cap(node.role));
+      }
     }
+    if (node.value) parts.push(`- ${node.value}`);
+    if (node.states.length) parts.push(`- ${node.states.join(", ")}`);
+    if (node.coords) parts.push(`- row ${node.coords.row}, col ${node.coords.col}`);
+    if (node.pos) parts.push(`- ${node.pos.pos} of ${node.pos.size}`);
 
     return parts.join(" ");
-  }, [nav, index]);
+  }, [nodes, index]);
 
   // Append to narration feed whenever index changes (unless muted)
   useEffect(() => {
-    if (!hudOpen) return;
-    if (!currentAnnouncement) return;
-    if (muted) return;
-    setLog((prev) => [currentAnnouncement, ...prev].slice(0, 50));
+    if (!hudOpen || !currentAnnouncement) return;
+    //setLog((prev) => [currentAnnouncement, ...prev].slice(0, 50));
+    setLog(() => [currentAnnouncement]);
   }, [currentAnnouncement, hudOpen, muted]);
 
   // Actions
-  const onPrev = useCallback(() => {
-    focusAt(index - 1);
-  }, [focusAt, index]);
-
-  const onNext = useCallback(() => {
-    focusAt(index + 1);
-  }, [focusAt, index]);
+  const onPrev = useCallback(() => focusPrev(), [focusPrev]);
+  const onNext = useCallback(() => focusNext(), [focusNext]);
 
   const onSelect = useCallback(() => {
-    const node = nav[index];
+    const node = nodes[index];
     if (!node) return;
-    // Best-effort activation (like “Select”)
-    (node.el as HTMLElement).click?.();
-    if (!muted) setLog((prev) => [`Activated${node.label ? ` - ${node.label}` : ""}`, ...prev].slice(0, 50));
-  }, [nav, index, muted]);
+    const el = node.el as HTMLElement;
+    const tag = el.tagName.toLowerCase();
+    const role = node.role;
+
+    // Focus text-editable; otherwise activate
+    const editable =
+      tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable || role === "textbox";
+    if (editable) {
+      el.focus?.();
+      if (!muted) setLog((prev) => [`Edit field${node.name ? ` - ${node.name}` : ""}`, ...prev].slice(0, 50));
+    } else {
+      el.click?.();
+      if (!muted) setLog((prev) => [`Activated${node.name ? ` - ${node.name}` : ""}`, ...prev].slice(0, 50));
+    }
+  }, [nodes, index, muted]);
 
   const onEscape = useCallback(() => {
-    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    window.speechSynthesis?.cancel();
     document.querySelectorAll(".srs-focus-ring").forEach((el) => el.classList.remove("srs-focus-ring"));
     if (!muted) setLog((prev) => ["Stopped / cleared highlight", ...prev].slice(0, 50));
   }, [muted]);
@@ -113,7 +112,11 @@ export function ScreenReaderHUD(): JSX.Element | null {
         <div style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #eef2f7" }}>
           <strong style={{ fontWeight: 600 }}>Screen reader</strong>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <a href="#" onClick={(e) => { e.preventDefault(); rescan(); }} style={{ color: "#6b7280", textDecoration: "none" }}>
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); /* tree mirrors DOM; no separate rescan needed */ }}
+              style={{ color: "#6b7280", textDecoration: "none" }}
+            >
               How to use a screen reader
             </a>
             <button
@@ -134,7 +137,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
           <ControlButton label="Previous" sub="Left" onClick={onPrev} />
           <ControlButton label="Next" sub="Right" onClick={onNext} />
           <ControlButton label="Select" sub="Space" onClick={onSelect} highlight />
-          <ControlButton label="Escape" sub="Esc" onClick={onEscape} disabled={false} mutedLook />
+          <ControlButton label="Escape" sub="Esc" onClick={onEscape} mutedLook />
         </div>
 
         {/* Sub-help row for H shortcut */}
@@ -148,7 +151,13 @@ export function ScreenReaderHUD(): JSX.Element | null {
         <div style={{ display: "flex", alignItems: "center", padding: "8px 12px", borderTop: "1px solid #eef2f7" }}>
           <strong style={{ fontWeight: 600, fontSize: 13 }}>Narration</strong>
           <button
-            onClick={() => setMuted((m) => !m)}
+            onClick={() => {
+                if (!muted) {
+                  window.speechSynthesis.cancel();
+                }
+                setMuted((m) => !m)
+              }
+            }
             style={{
               marginLeft: "auto",
               border: 0,
@@ -200,10 +209,6 @@ export function ScreenReaderHUD(): JSX.Element | null {
   );
 }
 
-/* ============================
- * Little UI atoms
- * ============================
- */
 function ControlButton({
   label,
   sub,
@@ -238,13 +243,11 @@ function ControlButton({
   );
 }
 
-function Bubble({
-  children,
-  kind = "user",
-}: {
-  children: React.ReactNode;
-  kind?: "system" | "user";
-}) {
+function Bubble({ children, kind = "user" }: { children: React.ReactNode; kind?: "system" | "user" }) {
   const light = kind !== "system";
   return <div className={`srs-bubble ${light ? "srs-bubble--light" : ""}`}>{children}</div>;
+}
+
+function cap(s: string) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }

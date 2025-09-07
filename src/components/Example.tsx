@@ -18,7 +18,7 @@ export default function A11yIssuesFormDemo(): JSX.Element {
           position: "relative",
           padding: 24,
           maxWidth: 860,
-          margin: "24px auto",
+          margin: "auto auto",
           fontFamily:
             "system-ui, -apple-system, Segoe UI, Roboto, Inter, 'Helvetica Neue', Arial, sans-serif",
           color: "#111827",
@@ -33,7 +33,7 @@ export default function A11yIssuesFormDemo(): JSX.Element {
               letterSpacing: "-0.01em",
             }}
           >
-            Demo: Modern Form (with intentional a11y issues)
+            Fill in your information to redeem your CDC vouchers
           </h1>
           <p style={{ marginTop: 6, color: "#6b7280", fontSize: 14 }}>
             Use this to demonstrate how “pretty UI” can still be inaccessible.
@@ -42,8 +42,10 @@ export default function A11yIssuesFormDemo(): JSX.Element {
 
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "1.1fr 0.9fr",
+            width: "430px",
+            display: "flex",
+            flexDirection: "column",
+
             gap: 16,
           }}
         >
@@ -125,29 +127,6 @@ export default function A11yIssuesFormDemo(): JSX.Element {
                 <input placeholder="name@example.com" style={inputStyle} />
               </div>
 
-              {/* (1) Name/Role/Value: A custom switch without role/aria-checked */}
-              {/* ❌ Screen readers won’t understand its state */}
-              <div>
-                <div style={{ marginBottom: 6, fontWeight: 600 }}>
-                  Marketing emails
-                </div>
-                <div
-                  // Looks like a switch, but has no role or state
-                  // ❌ Name, Role, Value (A): missing role="switch" and aria-checked
-                  onClick={(e) => {
-                    const el = e.currentTarget;
-                    // purely visual on/off toggle
-                    el.classList.toggle("on");
-                  }}
-                  style={switchStyle}
-                >
-                  <div className="knob" />
-                  <span style={{ marginLeft: 8, fontSize: 13, color: "#374151" }}>
-                    Subscribe to updates
-                  </span>
-                </div>
-              </div>
-
               {/* (2) Keyboard: A div that behaves like a button but is mouse-only */}
               {/* ❌ Keyboard (A): No role, no tabindex, no keyboard handlers */}
               <div
@@ -179,39 +158,6 @@ export default function A11yIssuesFormDemo(): JSX.Element {
               </div>
             </div>
           </section>
-
-          {/* ===== Right: “Looks like” related info, but not programmatically related ===== */}
-          {/* ❌ Info & Relationships (A): Visually paired, but not referenced with aria-describedby/fieldset/legend */}
-          <aside
-            style={{
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              borderRadius: 12,
-              boxShadow: "0 10px 30px rgba(0,0,0,.06)",
-              padding: 16,
-              display: "grid",
-              gap: 12,
-              alignSelf: "start",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {/* (5) Non-text Content: decorative image lacking alt */}
-              {/* ❌ No alt → screen readers may announce file name or nothing useful */}
-              <img
-                src="https://via.placeholder.com/20x20"
-                style={{ borderRadius: 4 }}
-              />
-              <strong>Helpful tips</strong>
-            </div>
-            <p style={{ margin: 0, color: "#374151", lineHeight: 1.5 }}>
-              Keep your details up to date. This panel looks associated with the
-              form but isn’t programmatically connected to any field.
-            </p>
-            <ul style={{ margin: 0, paddingLeft: 18, color: "#374151" }}>
-              <li>Names should match your official documents.</li>
-              <li>Use a reachable email you check often.</li>
-            </ul>
-          </aside>
         </div>
       </div>
 

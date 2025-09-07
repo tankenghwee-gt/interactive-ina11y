@@ -1,201 +1,194 @@
-// =============================
-// Minimal Screen Reader Simulator Hook
-// Keys: Left/Right, H (⇧H prev), Esc
-// =============================
-
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// useScreenReaderSimulator.ts
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  type ScreenReaderSimulatorOptions,
-  type NavNode,
-  collectNavigables,
+  collectAccTree,
+  type AccNode,
   speak,
-  stateOf,
-  tableCoords,
-  roleOf,
-  headingLevel,
-  getText,
 } from "../utils/utils";
 
-// eslint-disable-next-line react-refresh/only-export-components
-export function useScreenReaderSimulator(options: ScreenReaderSimulatorOptions = {}) {
+export function useScreenReaderSimulator(options: { lang?: string } = {}) {
   const { lang } = options;
 
-  const [nav, setNav] = useState<NavNode[]>([]);
-  const [index, setIndex] = useState<number>(0);
-  const [hudOpen, setHudOpen] = useState<boolean>(true);
-  const liveObsRef = useRef<MutationObserver | null>(null);
-
-  // Voice (keep simple, just pick preferred if present)
+  const [nodes, setNodes] = useState<AccNode[]>([]);
+  const [index, setIndex] = useState(0);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [speechUnlocked, setSpeechUnlocked] = useState(false);
+  const [muted, setMuted] = useState(false);
+
+  // Load voices properly
   useEffect(() => {
+    console.log("speechSynthesis" in window);
     if (!("speechSynthesis" in window)) return;
-    const load = () => setVoices(window.speechSynthesis.getVoices());
-    load();
-    window.speechSynthesis.onvoiceschanged = load;
-    return () => { window.speechSynthesis.onvoiceschanged = null; };
+    const update = () => {
+      const v = window.speechSynthesis.getVoices();
+      if (v.length) setVoices(v);
+    };
+    update();
+    window.speechSynthesis.addEventListener("voiceschanged", update);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", update);
   }, []);
-  const preferredVoice = useMemo<SpeechSynthesisVoice | null>(() => {
+
+  const preferredVoice = useMemo(() => {
     if (!lang || !voices.length) return null;
-    const exact = voices.find((v) => v.lang?.toLowerCase() === lang.toLowerCase());
-    if (exact) return exact;
-    const p = lang.split("-")[0].toLowerCase();
-    return voices.find((v) => v.lang?.toLowerCase().startsWith(p)) || null;
+    return (
+      voices.find((v) => v.lang?.toLowerCase() === lang.toLowerCase()) ||
+      voices.find((v) =>
+        v.lang?.toLowerCase().startsWith(lang.split("-")[0].toLowerCase())
+      ) ||
+      null
+    );
   }, [voices, lang]);
 
-  // Position text helper
-  const positionText = useCallback((i: number, list: NavNode[]) => `${i + 1} of ${list.length}`, []);
-
-  // Build announcement text (kept compact but SR-like)
-  const announce = useCallback((node: NavNode, posText: string): string => {
-    const role = roleOf(node.el);
-    const state = stateOf(node.el);
-    const parts: string[] = [];
-
-    if (node.kind === "heading") {
-      const lvl = (node.meta?.level as number) || headingLevel(node.el) || 2;
-      parts.push(`heading level ${lvl}`);
-      if (node.label) parts.push(node.label);
-      if (posText) parts.push(posText);
-      return parts.join(", ");
-    }
-
-    if (node.kind === "table") {
-      const rows = (node.el as HTMLTableElement).rows?.length || 0;
-      parts.push("table");
-      if (node.label) parts.push(node.label);
-      if (rows) parts.push(`${rows} rows`);
-      if (posText) parts.push(posText);
-      return parts.join(", ");
-    }
-
-    if (node.kind === "graphic") {
-      parts.push("graphic");
-      if (node.label) parts.push(node.label);
-      if (posText) parts.push(posText);
-      return parts.join(", ");
-    }
-
-    if (node.kind === "link") {
-      parts.push("link");
-      parts.push(node.label || (node.el.getAttribute("href") || ""));
-      if (posText) parts.push(posText);
-      return parts.join(", ");
-    }
-
-    if (node.kind === "region") {
-      parts.push("landmark region");
-      if (node.label) parts.push(node.label);
-      if (posText) parts.push(posText);
-      return parts.join(", ");
-    }
-
-    // controls / others
-    parts.push(role);
-    if (node.label) parts.push(node.label);
-    if (state) parts.push(state);
-    if (posText) parts.push(posText);
-    const coords = tableCoords(node.el);
-    if (coords) parts.push(`row ${coords.row}, column ${coords.col}`);
-    return parts.join(", ");
+  // Initial build of tree
+  useEffect(() => {
+    setNodes(collectAccTree());
   }, []);
 
-  const focusAt = useCallback((i: number, interrupt = true): void => {
-    if (!nav.length) return;
-    const clamped = Math.max(0, Math.min(nav.length - 1, i));
-    setIndex(clamped);
-    const node = nav[clamped];
-    if (!node) return;
+  const announce = useCallback(
+    (node: AccNode, i: number): string => {
+      const parts: string[] = [];
+      if (node.name) parts.push(node.name);
 
-    document.querySelectorAll(".srs-focus-ring").forEach((e) => e.classList.remove("srs-focus-ring"));
-    node.el.classList.add("srs-focus-ring");
-    node.el.scrollIntoView({ block: "center", behavior: "smooth" });
+      // Skip internal "statictext"
+      if (node.role && node.role !== "statictext") parts.push(node.role);
 
-    const text = announce(node, positionText(clamped, nav));
-    speak(text, { voice: preferredVoice, interrupt });
-  }, [nav, preferredVoice, announce, positionText]);
+      if (node.value) parts.push(node.value);
+      if (node.states.length) parts.push(node.states.join(", "));
+      if (node.pos) parts.push(`${node.pos.pos} of ${node.pos.size}`);
+      if (node.coords) parts.push(`row ${node.coords.row}, column ${node.coords.col}`);
+      parts.push(`${i + 1} of ${nodes.length}`);
+      return parts.join(", ");
+    },
+    [nodes.length]
+  );
+
+  const focusAt = useCallback(
+    (i: number) => {
+      if (!nodes.length) return;
+      const clamped = Math.max(0, Math.min(nodes.length - 1, i));
+      setIndex(clamped);
+      const node = nodes[clamped];
+      if (!node) return;
+      document
+        .querySelectorAll(".srs-focus-ring")
+        .forEach((e) => e.classList.remove("srs-focus-ring"));
+      node.el.classList.add("srs-focus-ring");
+      node.el.scrollIntoView({ block: "center", behavior: "smooth" });
+      const text = announce(node, clamped);
+
+      if (speechUnlocked && !muted) {
+        speak(text, { voice: preferredVoice || undefined, interrupt: true });
+      }
+    },
+    [nodes, announce, speechUnlocked, preferredVoice, muted]
+  );
 
   const focusNext = useCallback(() => focusAt(index + 1), [focusAt, index]);
   const focusPrev = useCallback(() => focusAt(index - 1), [focusAt, index]);
 
-  const findNextHeadingIndex = useCallback(() => {
-    for (let i = index + 1; i < nav.length; i++) {
-      if (nav[i].kind === "heading") return i;
-    }
-    return -1;
-  }, [index, nav]);
-
-  const findPrevHeadingIndex = useCallback(() => {
-    for (let i = index - 1; i >= 0; i--) {
-      if (nav[i].kind === "heading") return i;
-    }
-    return -1;
-  }, [index, nav]);
-
-  // Keyboard: Left/Right/H/Esc only
+  // Key bindings
   useEffect(() => {
+    const isEditable = (el: HTMLElement | null, role?: string) =>
+      !!el &&
+      (el.isContentEditable ||
+        el.tagName === "INPUT" ||
+        el.tagName === "TEXTAREA" ||
+        el.tagName === "SELECT" ||
+        role === "textbox" ||
+        role === "combobox");
+
+    const restoreRing = () => {
+      const node = nodes[index];
+      document
+        .querySelectorAll(".srs-focus-ring")
+        .forEach((e) => e.classList.remove("srs-focus-ring"));
+      if (node) node.el.classList.add("srs-focus-ring");
+    };
+
+    const activateOrFocus = () => {
+      const node = nodes[index];
+      if (!node) return;
+      const el = node.el;
+      if (isEditable(el, node.role)) el.focus?.();
+      else (el as HTMLElement).click?.();
+    };
+
     const onKey = (e: KeyboardEvent) => {
-      const tag = (document.activeElement?.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea") return; // don’t hijack typing
+      const active = document.activeElement as HTMLElement | null;
+      const activeIsEditable = isEditable(active);
 
-      // Left/Right arrows
-      if (e.key === "ArrowRight") { e.preventDefault(); focusNext(); return; }
-      if (e.key === "ArrowLeft")  { e.preventDefault(); focusPrev(); return; }
+      // Unlock speech on first user gesture
+      if (
+        !speechUnlocked &&
+        ["ArrowRight", "ArrowLeft", "h", "H", "Enter", " "].includes(e.key)
+      ) {
+        setSpeechUnlocked(true);
+        if (!muted) {
+          speak("Screen reader ready", { voice: preferredVoice || undefined });
+        }
+      }
 
-      // H (next heading), Shift+H (previous heading)
-      if (e.key.toLowerCase() === "h") {
+      // Always handle Escape, even inside text fields
+      if (e.key === "Escape") {
         e.preventDefault();
-        const idx = e.shiftKey ? findPrevHeadingIndex() : findNextHeadingIndex();
-        if (idx !== -1) {
-          focusAt(idx);
+        window.speechSynthesis?.cancel();
+        if (activeIsEditable) {
+          active?.blur();
+          restoreRing();
         } else {
-          speak(e.shiftKey ? "No previous heading" : "No next heading", { voice: preferredVoice });
+          document
+            .querySelectorAll(".srs-focus-ring")
+            .forEach((el) => el.classList.remove("srs-focus-ring"));
         }
         return;
       }
 
-      // Escape: stop speech & clear highlight (and gently hide HUD if any)
-      if (e.key === "Escape") {
-        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-        document.querySelectorAll(".srs-focus-ring").forEach((el) => el.classList.remove("srs-focus-ring"));
-        setHudOpen(false);
-        return;
+      if (activeIsEditable) return;
+
+      switch (e.key) {
+        case "ArrowRight":
+          e.preventDefault();
+          focusNext();
+          return;
+        case "ArrowLeft":
+          e.preventDefault();
+          focusPrev();
+          return;
+        case "h":
+        case "H": {
+          e.preventDefault();
+          if (e.shiftKey) {
+            for (let i = index - 1; i >= 0; i--) {
+              if (nodes[i]?.role === "heading") {
+                focusAt(i);
+                return;
+              }
+            }
+          } else {
+            for (let i = index + 1; i < nodes.length; i++) {
+              if (nodes[i]?.role === "heading") {
+                focusAt(i);
+                return;
+              }
+            }
+          }
+          return;
+        }
+        case " ":
+        case "Spacebar":
+        case "Enter":
+          e.preventDefault();
+          activateOrFocus();
+          return;
       }
     };
 
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, [focusNext, focusPrev, findNextHeadingIndex, findPrevHeadingIndex, focusAt, preferredVoice]);
-
-  // Live regions (kept minimal)
-  useEffect(() => {
-    if (liveObsRef.current) liveObsRef.current.disconnect();
-    const obs = new MutationObserver((muts) => {
-      for (const m of muts) {
-        const el = m.target as HTMLElement;
-        const live = el.getAttribute("aria-live");
-        if (!live) continue;
-        const txt = getText(el);
-        if (!txt) continue;
-        speak(txt, { interrupt: live === "assertive", voice: preferredVoice });
-      }
-    });
-    obs.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
-    liveObsRef.current = obs;
-    return () => obs.disconnect();
-  }, [preferredVoice]);
-
-  // Initial scan
-  const rescan = useCallback(() => {
-    const list = collectNavigables();
-    setNav(list);
-    setIndex(0);
-    speak("Simulator ready. Use Left and Right arrows. Press H for next heading, Shift H for previous. Press Escape to stop.", { voice: preferredVoice });
-  }, [preferredVoice]);
-
-  useEffect(() => { rescan(); }, [rescan]);
+  }, [nodes, index, focusAt, focusNext, focusPrev, speechUnlocked, preferredVoice, muted]);
 
   return {
-    state: { nav, index, hudOpen },
-    actions: { rescan, focusAt, setHudOpen },
-  } as const;
+    state: { nodes, index, muted },
+    actions: { focusAt, focusNext, focusPrev, setMuted },
+  };
 }
