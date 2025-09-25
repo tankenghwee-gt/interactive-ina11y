@@ -30,6 +30,8 @@ export function ScreenReaderHUD(): JSX.Element | null {
             boxShadow: "0 4px 12px rgba(0,0,0,.15)",
             zIndex: 9999,
           }}
+          type="button"
+          aria-hidden
         >
           Open Screen Reader
         </button>
@@ -47,6 +49,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
             onClick={() => setHudOpen(false)}
             aria-label="Close"
             style={iconBtn}
+            type="button"
           >
             X
           </button>
@@ -189,6 +192,7 @@ function ControlButton({
       onClick={onClick}
       disabled={disabled}
       aria-disabled={disabled}
+      type="button"
     >
       <div>{label}</div>
       <div className="srs-sub">

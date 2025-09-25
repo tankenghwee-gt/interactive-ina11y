@@ -14,19 +14,17 @@ export default function Example(): JSX.Element {
           color: "#111827",
         }}
       >
-        <header style={{ marginBottom: 16 }}>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: 20,
-              fontWeight: 700,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            Fill in your information to redeem your CDC vouchers
-          </h1>
-        </header>
-
+        <h1
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 700,
+            letterSpacing: "-0.01em",
+            marginBottom: 16,
+          }}
+        >
+          Fill in your information to redeem your CDC vouchers
+        </h1>
         <div
           style={{
             maxWidth: 400,
@@ -35,82 +33,89 @@ export default function Example(): JSX.Element {
             gap: 16,
           }}
         >
-          <section
-            style={{
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              borderRadius: 12,
-              boxShadow: "0 10px 30px rgba(0,0,0,.06)",
-              padding: 16,
+          <form
+            onSubmit={(event) => {
+              event?.preventDefault();
+              alert("You did it! Good job!");
             }}
           >
-            {/* ===== Form fields — “pretty” but broken semantics ===== */}
-            <div style={{ display: "grid", gap: 12 }}>
-              {/* (4) Info & Relationships (A): placeholder-as-label; no <label> association */}
-              <div>
-                <div style={{ marginBottom: 6, fontWeight: 600 }}>Name</div>
-                <input
-                  id="name-input-missing-label" // id not used by any <label htmlFor>
-                  style={inputStyle}
-                />
-              </div>
-
-              {/* Another unlabeled input to make failure obvious */}
-              <div>
-                <div style={{ marginBottom: 6, fontWeight: 600 }}>
-                  Email address
+            <section
+              style={{
+                background: "#fff",
+                border: "1px solid #e5e7eb",
+                borderRadius: 12,
+                boxShadow: "0 10px 30px rgba(0,0,0,.06)",
+                padding: 16,
+              }}
+            >
+              {/* ===== Form fields — “pretty” but broken semantics ===== */}
+              <div style={{ display: "grid", gap: 12 }}>
+                {/* (4) Info & Relationships (A): placeholder-as-label; no <label> association */}
+                <div>
+                  <div style={{ marginBottom: 6, fontWeight: 600 }}>Name</div>
+                  <input
+                    id="name" // id not used by any <label htmlFor>
+                    style={inputStyle}
+                  />
                 </div>
-                <input style={inputStyle} />
-              </div>
 
-              <div className="psa">
-                <p>
-                  Please be aware of scam websites that falsely claim to offer
-                  CDC vouchers.
-                </p>
-                <p>
-                  Refer to the infographic below for examples of fake vs real
-                  pages.
-                </p>
-              </div>
-              <img
-                src="https://dam.mediacorp.sg/image/upload/s--2MP54hl5--/f_auto,q_auto/v1/mediacorp/cna/image/2025/02/14/scam_spf.png?itok=xTWaFySW"
-                style={{
-                  width: "100%",
-                  borderRadius: 8,
-                  border: "1px solid #e5e7eb",
-                }}
-              />
-              {/* (1) Name/Role/Value (A): “custom toggle” with no role or state */}
-              {/* (1) Name/Role/Value (A): visually styled checkbox without accessible name/role */}
-              <div className="flex items-center gap-2">
-                <div
-                  // ❌ Fake checkbox: no <input>, no role, no aria-checked
-                  onClick={(e) => e.currentTarget.classList.toggle("checked")}
-                  className="fake-checkbox w-5 h-5 border border-gray-400 bg-white cursor-pointer"
+                {/* Another unlabeled input to make failure obvious */}
+                <div>
+                  <div style={{ marginBottom: 6, fontWeight: 600 }}>
+                    Email address
+                  </div>
+                  <input id="email" style={inputStyle} />
+                </div>
+
+                <div className="psa">
+                  <p>
+                    Please be aware of scam websites that falsely claim to offer
+                    CDC vouchers.
+                  </p>
+                  <p>
+                    Refer to the infographic below for examples of fake vs real
+                    pages.
+                  </p>
+                </div>
+                <img
+                  src="https://dam.mediacorp.sg/image/upload/s--2MP54hl5--/f_auto,q_auto/v1/mediacorp/cna/image/2025/02/14/scam_spf.png?itok=xTWaFySW"
+                  style={{
+                    width: "100%",
+                    borderRadius: 8,
+                    border: "1px solid #e5e7eb",
+                  }}
                 />
-                <span className="text-sm text-gray-800">
-                  I agree to receive updates for future CDC Vouchers through
-                  email
-                </span>
-              </div>
-              {/* (2) Keyboard (A): mouse-only control — not reachable or activatable by keyboard */}
-              <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                Try activating the button below with keyboard.
-              </p>
-              <div
-                onClick={() =>
-                  alert("Congratulations, you have submitted the form!")
-                }
-                style={ghostBtn}
-                className={"srs-btn--muted"}
-              >
-                Submit
-              </div>
+                {/* (1) Name/Role/Value (A): “custom toggle” with no role or state */}
+                {/* (1) Name/Role/Value (A): visually styled checkbox without accessible name/role */}
+                <div className="flex items-center gap-2">
+                  <div
+                    // ❌ Fake checkbox: no <input>, no role, no aria-checked
+                    onClick={(e) => e.currentTarget.classList.toggle("checked")}
+                    className="fake-checkbox w-5 h-5 border border-gray-400 bg-white cursor-pointer"
+                  />
+                  <span className="text-sm text-gray-800">
+                    I agree to receive updates for future CDC Vouchers through
+                    email
+                  </span>
+                </div>
+                {/* (2) Keyboard (A): mouse-only control — not reachable or activatable by keyboard */}
+                <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                  Try activating the button below with keyboard.
+                </p>
+                <div
+                  onClick={() =>
+                    alert("Congratulations! Did you click the button?")
+                  }
+                  style={ghostBtn}
+                  className={"srs-btn--muted"}
+                >
+                  Submit
+                </div>
 
-              {/* Actions */}
-            </div>
-          </section>
+                {/* Actions */}
+              </div>
+            </section>
+          </form>
         </div>
       </div>
 

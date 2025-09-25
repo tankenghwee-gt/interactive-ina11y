@@ -38,6 +38,7 @@ export default function Demo({ example }: DemoProps): JSX.Element {
           boxShadow: "0 4px 12px rgba(0,0,0,.15)",
           zIndex: 9999,
         }}
+        type="button"
         name={`Turn ${hideContent ? "off" : "on"} simulation`}
       >
         {`Turn ${hideContent ? "off" : "on"} simulation`}
