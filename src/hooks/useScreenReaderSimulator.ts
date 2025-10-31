@@ -44,10 +44,30 @@ export function useScreenReaderCore({
 
   const preferredVoice = useMemo(() => {
     if (!lang || !voices.length) return null;
+    const normalizedLang = lang.toLowerCase();
+    const voicePreferences = [
+      { name: "Google US English", lang: "en-US" },
+      {
+        name: "Microsoft Aria Online (Natural) - English (United States)",
+        lang: "en-US",
+      },
+      { name: "Samantha", lang: "en-US" }, // Apple voice
+      { name: "English United States", lang: "en-US" },
+    ];
+
+    for (const pref of voicePreferences) {
+      const v = voices.find(
+        (x) =>
+          x.name === pref.name &&
+          x.lang?.toLowerCase() === pref.lang.toLowerCase()
+      );
+      if (v) return v;
+    }
+
     return (
-      voices.find((v) => v.lang?.toLowerCase() === lang.toLowerCase()) ||
+      voices.find((v) => v.lang?.toLowerCase() === normalizedLang) ||
       voices.find((v) =>
-        v.lang?.toLowerCase().startsWith(lang.split("-")[0].toLowerCase())
+        v.lang?.toLowerCase().startsWith(normalizedLang.split("-")[0])
       ) ||
       null
     );
