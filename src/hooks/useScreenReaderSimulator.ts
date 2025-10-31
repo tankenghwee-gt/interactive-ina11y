@@ -1,5 +1,5 @@
 // hooks/useScreenReaderSimulator.ts
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   collectAccTree,
   type AccNode,
@@ -28,6 +28,8 @@ export function useScreenReaderCore({
   const [speechUnlocked, setSpeechUnlocked] = useState(true);
   const [muted, setMuted] = useState(false);
   const [log, setLog] = useState<string[]>([]);
+  const typingDebounceRef = useRef<number | null>(null);
+  const lastEditableElRef = useRef<HTMLElement | null>(null);
 
   // ---- Voices
   useEffect(() => {
@@ -163,6 +165,39 @@ export function useScreenReaderCore({
       }
     },
     [enabled, onNarrate, speechUnlocked, muted, preferredVoice]
+  );
+
+  const announceEditableValueSoon = useCallback(
+    (target: HTMLElement) => {
+      // Clear previous timer
+      if (typingDebounceRef.current) {
+        clearTimeout(typingDebounceRef.current);
+        typingDebounceRef.current = null;
+      }
+
+      // Debounce to wait for DOM value to settle (covers keydown->value update & IME)
+      typingDebounceRef.current = window.setTimeout(() => {
+        const el = target as
+          | HTMLInputElement
+          | HTMLTextAreaElement
+          | HTMLElement;
+        const isPassword =
+          el instanceof HTMLInputElement && el.type === "password";
+
+        if (isPassword) {
+          narrate("Password field, value hidden");
+          return;
+        }
+
+        const val =
+          (el as HTMLInputElement | HTMLTextAreaElement).value ??
+          el.textContent ??
+          "";
+
+        narrate(`Value: ${val?.toString().trim() || "blank"}`);
+      }, 1000);
+    },
+    [narrate]
   );
 
   // ---- Focus helpers
@@ -316,7 +351,53 @@ export function useScreenReaderCore({
         escapeAction();
         return;
       }
-      if (activeIsEditable) return;
+      if (activeIsEditable) {
+        const el = active as HTMLInputElement | HTMLTextAreaElement;
+
+        // Keep track so paste/mouse edits (input event) know which element to read
+        if (active) lastEditableElRef.current = active;
+
+        // Announce keystrokes (don’t block typing)
+        const printable =
+          e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+
+        // Speak common keys similarly to SRs
+        if (printable) {
+          narrate(e.key === " " ? "space" : e.key);
+          announceEditableValueSoon(active!);
+        } else {
+          switch (e.key) {
+            case "Backspace":
+              if (el.selectionStart) {
+                narrate(el.value[el.selectionStart - 1]);
+              }
+              break;
+            case "Delete":
+              if (el.selectionStart) {
+                narrate(el.value[el.selectionStart]);
+              }
+              break;
+            case "ArrowLeft":
+              if (el.selectionStart) {
+                if (el.selectionStart < el.value.length) {
+                  narrate(el.value[el.selectionStart - 1]);
+                }
+              }
+              break;
+            case "ArrowRight":
+              if (el.selectionStart) {
+                if (el.selectionStart < el.value.length) {
+                  narrate(el.value[el.selectionStart]);
+                }
+              }
+              break;
+            // You can add more (ArrowLeft/Right, Home/End) if desired
+          }
+        }
+
+        // Important: do NOT preventDefault; we want normal typing to proceed.
+        return;
+      }
 
       switch (e.key) {
         case "ArrowRight":
@@ -375,6 +456,7 @@ export function useScreenReaderCore({
     muted,
     speechUnlocked,
     preferredVoice,
+    announceEditableValueSoon,
   ]);
 
   // ---- NEW: sync with native browser focus (e.g., after checkValidity())
