@@ -1,60 +1,93 @@
 import React, { useState, type JSX } from "react";
 import { useScreenReaderCore } from "../hooks/useScreenReaderSimulator";
-import { HiSpeakerWave, HiSpeakerXMark } from "react-icons/hi2";
+import { HiSpeakerWave, HiSpeakerXMark } from "react-icons/hi2"; // Install react-icons if needed or use text '?'
 import { speak } from "../utils/utils";
 
 export function ScreenReaderHUD(): JSX.Element | null {
   const [hudOpen, setHudOpen] = useState(true);
+  const [showHelp, setShowHelp] = useState(false); // <--- NEW: Toggle for shortcuts
 
   const {
-    state: { muted, log },
+    state: { muted, log, activeRect },
     actions: { focusPrev, focusNext, activateOrFocus, escapeAction, setMuted },
   } = useScreenReaderCore({ lang: "en-US", enabled: hudOpen });
 
   if (!hudOpen) {
     return (
-      <>
-        <button
-          onClick={() => setHudOpen(true)}
-          style={{
-            position: "absolute",
-            right: 16,
-            top: 16,
-            padding: "10px 16px",
-            background: "#7c3aed",
-            color: "#fff",
-            border: 0,
-            borderRadius: 8,
-            cursor: "pointer",
-            fontWeight: 600,
-            boxShadow: "0 4px 12px rgba(0,0,0,.15)",
-            zIndex: 9999,
-          }}
-          type="button"
-          aria-hidden
-        >
-          Open Screen Reader
-        </button>
-      </>
+      <button
+        onClick={() => setHudOpen(true)}
+        style={floatingTriggerBtn}
+        type="button"
+        aria-hidden
+      >
+        Open Screen Reader
+      </button>
     );
   }
 
   return (
     <div style={containerStyle} aria-hidden>
+      {activeRect && (
+        <div
+          style={{
+            position: "fixed",
+            top: activeRect.top,
+            left: activeRect.left,
+            width: activeRect.width,
+            height: activeRect.height,
+            outline: "4px solid #7c3aed",
+            outlineOffset: "2px",
+            pointerEvents: "none",
+            zIndex: 99999,
+            transition: "all 0.15s ease-out",
+          }}
+        />
+      )}
       {/* Header */}
       <div style={headerStyle}>
-        <strong style={{ fontWeight: 600 }}>Screen reader</strong>
+        <strong style={{ fontWeight: 600 }}>Screen Reader</strong>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {/* HELP TOGGLE */}
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            style={iconBtn}
+            title="Keyboard Shortcuts"
+            aria-expanded={showHelp}
+          >
+            <span style={{ fontSize: 18, fontWeight: "bold" }}>?</span>
+          </button>
+
           <button
             onClick={() => setHudOpen(false)}
             aria-label="Close"
             style={iconBtn}
             type="button"
           >
-            X
+            ✕
           </button>
         </div>
       </div>
+
+      {/* --- NEW: SHORTCUTS PANEL --- */}
+      {showHelp && (
+        <div style={helpPanelStyle}>
+          <div style={helpGrid}>
+            <KeyRow k="H" label="Headings" />
+            <KeyRow k="1-6" label="Heading Levels" />
+            <KeyRow k="B" label="Buttons" />
+            <KeyRow k="L" label="Links" />
+            <KeyRow k="F" label="Forms" />
+            <KeyRow k="T" label="Tables" />
+            <KeyRow k="G" label="Graphics" />
+            <KeyRow k="D" label="Landmarks" />
+            <KeyRow k="Space" label="Activate / Toggle" />
+            <KeyRow k="Esc" label="Exit Focus Mode" />
+          </div>
+          <small style={{ display: "block", marginTop: 8, color: "#666" }}>
+            Hold <strong>Shift</strong> to move backwards.
+          </small>
+        </div>
+      )}
 
       {/* Controls */}
       <div
@@ -65,65 +98,38 @@ export function ScreenReaderHUD(): JSX.Element | null {
           padding: 12,
         }}
       >
-        <ControlButton label="Previous" sub="Left" onClick={focusPrev} />
-        <ControlButton label="Next" sub="Right" onClick={focusNext} />
+        <ControlButton label="Previous" sub="Left Arrow" onClick={focusPrev} />
+        <ControlButton label="Next" sub="Right Arrow" onClick={focusNext} />
         <ControlButton
-          label="Select/Edit"
-          sub="Space"
+          label="Select"
+          sub="Enter/Space"
           onClick={activateOrFocus}
+          highlight
         />
-        <ControlButton
-          label="Stop Edit/Narration"
-          sub="Esc"
-          onClick={escapeAction}
-        />
+        <ControlButton label="Stop/Esc" sub="Esc" onClick={escapeAction} />
       </div>
 
-      <div style={{ padding: "0 12px 8px 12px", color: "#6b7280" }}>
-        <small>
-          Tip: Press <kbd className="srs-kbd">H</kbd> to jump between headings
-        </small>
-      </div>
-
-      {/* Narration */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          padding: "8px 12px",
-          borderTop: "1px solid #eef2f7",
-        }}
-      >
-        <strong style={{ fontWeight: 600 }}>Narration</strong>
+      {/* Narration Toggle */}
+      <div style={narrationBarStyle}>
+        <strong style={{ fontWeight: 600, fontSize: 13 }}>Speech Output</strong>
         <button
           onClick={() => {
-            if (!muted) {
-              window.speechSynthesis?.cancel();
-            } else {
-              speak("Unmuted");
-            }
+            if (!muted) window.speechSynthesis?.cancel();
+            else speak("Unmuted");
             setMuted(!muted);
           }}
           aria-pressed={muted}
           className={`srs-mute-btn ${muted ? "is-muted" : ""}`}
         >
-          {muted ? <HiSpeakerXMark size={22} /> : <HiSpeakerWave size={22} />}
+          {muted ? <HiSpeakerXMark size={18} /> : <HiSpeakerWave size={18} />}
           <span className="srs-mute-label">
             {muted ? "Click to unmute" : "Click to mute"}
-          </span>
+          </span>{" "}
         </button>
       </div>
 
-      <div
-        style={{
-          padding: "8px 12px 12px 12px",
-          maxHeight: 280,
-          overflow: "auto",
-          display: "grid",
-          gap: 8,
-        }}
-      >
+      {/* Logs */}
+      <div style={logContainerStyle}>
         {log.length > 0 ? (
           <Bubble kind="user">{log[0]}</Bubble>
         ) : (
@@ -134,34 +140,32 @@ export function ScreenReaderHUD(): JSX.Element | null {
   );
 }
 
-const containerStyle: React.CSSProperties = {
-  position: "fixed",
-  right: 16,
-  top: 16,
-  width: 320,
-  zIndex: 2147483647,
-  background: "#fff",
-  borderRadius: 12,
-  boxShadow: "0 10px 30px rgba(0,0,0,.2)",
-  fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-  fontSize: 14,
-  overflow: "scroll",
-  border: "1px solid #e5e7eb",
-};
+// --- SUBCOMPONENTS ---
 
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  padding: "10px 12px",
-  borderBottom: "1px solid #eef2f7",
-};
+function KeyRow({ k, label }: { k: string; label: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+      }}
+    >
+      <span style={{ fontSize: 13, color: "#374151" }}>{label}</span>
+      <kbd className="srs-kbd" style={{ fontSize: 12 }}>
+        {k}
+      </kbd>
+    </div>
+  );
+}
 
-const iconBtn: React.CSSProperties = {
-  border: 0,
-  background: "transparent",
-  color: "#6b7280",
-  cursor: "pointer",
-};
+interface ControlButtonProps {
+  label: string;
+  sub: string;
+  onClick: () => void;
+  disabled?: boolean;
+  highlight?: boolean;
+}
 
 function ControlButton({
   label,
@@ -169,34 +173,15 @@ function ControlButton({
   onClick,
   disabled,
   highlight,
-  mutedLook,
-}: {
-  label: string;
-  sub: string;
-  onClick: () => void;
-  disabled?: boolean;
-  highlight?: boolean;
-  mutedLook?: boolean;
-}) {
-  const cls = [
-    "srs-btn",
-    highlight ? "srs-btn--primary" : "",
-    mutedLook ? "srs-btn--muted" : "",
-    disabled ? "srs-btn--disabled" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+}: ControlButtonProps) {
+  const cls = `srs-btn ${highlight ? "srs-btn--primary" : ""} ${
+    disabled ? "srs-btn--disabled" : ""
+  }`;
   return (
-    <button
-      className={cls}
-      onClick={onClick}
-      disabled={disabled}
-      aria-disabled={disabled}
-      type="button"
-    >
+    <button className={cls} onClick={onClick} disabled={disabled} type="button">
       <div>{label}</div>
-      <div className="srs-sub">
-        <kbd className="srs-kbd">{sub}</kbd>
+      <div className="srs-sub" style={{ opacity: 0.7 }}>
+        {sub}
       </div>
     </button>
   );
@@ -204,10 +189,10 @@ function ControlButton({
 
 function Bubble({
   children,
-  kind = "user",
+  kind,
 }: {
   children: React.ReactNode;
-  kind?: "system" | "user";
+  kind: "system" | "user";
 }) {
   const light = kind !== "system";
   return (
@@ -216,3 +201,89 @@ function Bubble({
     </div>
   );
 }
+
+// --- STYLES ---
+
+const containerStyle: React.CSSProperties = {
+  position: "fixed",
+  right: 20,
+  top: 20,
+  width: 340,
+  maxHeight: "85vh",
+  zIndex: 2147483647,
+  background: "#fff",
+  borderRadius: 16,
+  boxShadow: "0 20px 50px rgba(0,0,0,.3), 0 0 0 1px rgba(0,0,0,.05)",
+  fontFamily: "system-ui, sans-serif",
+  fontSize: 14,
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden", // Important for internal scrolling
+};
+
+const helpPanelStyle: React.CSSProperties = {
+  background: "#f9fafb",
+  padding: "12px 16px",
+  borderBottom: "1px solid #e5e7eb",
+};
+
+const helpGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: "8px 24px",
+};
+
+const floatingTriggerBtn: React.CSSProperties = {
+  position: "fixed",
+  right: 20,
+  top: 20,
+  padding: "12px 20px",
+  background: "#2563eb",
+  color: "#fff",
+  border: 0,
+  borderRadius: 50,
+  cursor: "pointer",
+  fontWeight: 600,
+  boxShadow: "0 4px 20px rgba(37, 99, 235, 0.4)",
+  zIndex: 9999,
+};
+
+const headerStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  padding: "14px 16px",
+  borderBottom: "1px solid #f3f4f6",
+  background: "#fff",
+};
+
+const iconBtn: React.CSSProperties = {
+  border: 0,
+  background: "transparent",
+  color: "#6b7280",
+  cursor: "pointer",
+  padding: 4,
+  borderRadius: 4,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const narrationBarStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "10px 16px",
+  borderTop: "1px solid #f3f4f6",
+  background: "#fff",
+};
+
+const logContainerStyle: React.CSSProperties = {
+  padding: "12px",
+  overflowY: "auto",
+  flex: 1, // Takes remaining height
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  background: "#f9fafb",
+  borderTop: "1px solid #e5e7eb",
+};

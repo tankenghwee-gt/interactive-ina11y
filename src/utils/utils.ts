@@ -47,6 +47,18 @@ export interface AccNode {
 const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
 
 const isExposed = (el: HTMLElement): boolean => {
+  if (el.checkVisibility) {
+    return el.checkVisibility({
+      checkOpacity: false, // Screen readers usually read opacity: 0 elements
+      checkVisibilityCSS: true, // Respects visibility: hidden / display: none
+    });
+  }
+
+  // 2. Fallback (for older environments)
+  // offsetParent is null if the element (or any parent) is display: none
+  if (el.offsetParent === null && el.style.position !== "fixed") {
+    return false;
+  }
   const style = getComputedStyle(el);
   if (el.hidden) return false;
   if (el.closest("[hidden],[inert],[aria-hidden='true']")) return false;
@@ -78,11 +90,36 @@ const isFocusable = (el: HTMLElement): boolean => {
 };
 
 // Direct text only (no descendants)
-const getOwnText = (el: HTMLElement): string => {
+const getSafeText = (el: HTMLElement): string => {
   let s = "";
-  el.childNodes.forEach((n) => {
-    if (n.nodeType === Node.TEXT_NODE) {
-      s += (n.textContent || "").replace(/\s+/g, " ");
+  el.childNodes.forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      s += (child.textContent || "").replace(/\s+/g, " ");
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const elem = child as HTMLElement;
+
+      // 1. IGNORE tags that should never be read
+      // This fixes the CSS reading bug
+      const tagName = elem.tagName.toUpperCase();
+      if (
+        tagName === "SCRIPT" ||
+        tagName === "STYLE" ||
+        tagName === "NOSCRIPT"
+      ) {
+        return;
+      }
+
+      // 2. IGNORE hidden elements (standard check)
+      if (elem.hidden || elem.getAttribute("aria-hidden") === "true") {
+        return;
+      }
+
+      // If the child is a CANDIDATE itself (like a button or link), skip it.
+      // It will be its own node in the tree, so we don't want to double-read it.
+      // If it is NOT a candidate (like a <span>), recurse and grab its text.
+      if (!elem.matches(CANDIDATE_SELECTOR)) {
+        s += getSafeText(elem);
+      }
     }
   });
   return s.trim();
@@ -116,6 +153,26 @@ const NAME_FROM_CONTENT_ROLES = new Set<string>([
   "statictext",
 ]);
 
+// NEW: Helper to extract text + alt text recursively
+const getSubtreeName = (el: HTMLElement): string => {
+  let text = "";
+  el.childNodes.forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      text += child.textContent || "";
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const e = child as HTMLElement;
+      // If it's an image, use Alt Text
+      if (e.tagName === "IMG") {
+        text += (e as HTMLImageElement).alt || "";
+      } else {
+        // Recurse
+        text += getSubtreeName(e);
+      }
+    }
+  });
+  return text;
+};
+
 export const computeAccName = (el: HTMLElement): string => {
   // 1) aria-label
   const ariaLabel = el.getAttribute("aria-label");
@@ -141,9 +198,10 @@ export const computeAccName = (el: HTMLElement): string => {
   // 4) role-based content names
   const role = computeRole(el);
 
-  // Static text: own text only
+  // Static text: Use the new Safe Text aggregator
   if (role === "statictext") {
-    const own = getOwnText(el);
+    // CHANGED: Use getSafeText instead of getOwnText
+    const own = getSafeText(el);
     if (own) return own.length > 140 ? `${own.slice(0, 140)}…` : own;
   }
 
@@ -152,7 +210,7 @@ export const computeAccName = (el: HTMLElement): string => {
     role === "textbox" ||
     role === "combobox"
   ) {
-    const t = collapse(el.textContent || "");
+    const t = collapse(getSubtreeName(el));
     if (t) return t.length > 140 ? `${t.slice(0, 140)}…` : t;
   }
 
@@ -160,14 +218,27 @@ export const computeAccName = (el: HTMLElement): string => {
 };
 
 export const computeRole = (el: HTMLElement): string => {
-  const explicit = el.getAttribute("role");
-  if (explicit) return explicit.toLowerCase();
+  const explicit = el.getAttribute("role")?.toLowerCase();
+
+  // HANDLE PRESENTATION / NONE
+  if (explicit === "presentation" || explicit === "none") {
+    // Conflict Resolution: If it's focusable, ignore role="presentation"
+    if (isFocusable(el)) {
+      // Fall through to calculate the NATIVE role (e.g. <button>)
+    } else {
+      // It is truly presentational. Treat as having NO role.
+      return "";
+    }
+  } else if (explicit) {
+    // Valid explicit role
+    return explicit;
+  }
 
   const tag = el.tagName.toLowerCase();
   if (tag === "a" && (el as HTMLAnchorElement).href) return "link";
   if (tag === "button") return "button";
   if (/^h[1-6]$/.test(tag)) return "heading";
-  if (tag === "img") return "image";
+  if (tag === "img" || tag === "svg") return "image";
 
   if (tag === "input") {
     const t = (el as HTMLInputElement).type;
@@ -208,7 +279,7 @@ export const computeRole = (el: HTMLElement): string => {
 
   // Fallback: non-focusable containers with own text → statictext
   if (!isFocusable(el)) {
-    const own = getOwnText(el);
+    const own = getSafeText(el);
     if (own) return "statictext";
   }
 
@@ -341,44 +412,128 @@ export const computeTableCoords = (
 // Collector
 // =============================
 const CANDIDATE_SELECTOR = [
-  // interactive / focusable
   "a[href]",
   "button",
   "input",
   "select",
   "textarea",
   "[tabindex]:not([tabindex='-1'])",
-
-  // structure
   "h1,h2,h3,h4,h5,h6",
   "[role]",
   "table,th,td",
-
-  // media / graphics
-  "img",
-
-  // landmarks (native)
+  "img,svg",
   "nav,main,header,footer,aside,form,section[aria-label],section[aria-labelledby]",
-
-  // status/info
   "progress,meter,output,dialog,[aria-live]",
-
-  // inline emphasis + common text containers
-  "strong,b,em,mark,small,p,span,div",
+  // ADDED: article, figure, address, blockquote
+  "p,div,article,figure,address,blockquote,pre",
 ].join(",");
 
+// src/utils/utils.ts
+
+// ... keep your existing helpers ...
+
+// NEW: Helper to get all elements including those inside Shadow DOM
+const getDeepElements = (root: ParentNode = document): HTMLElement[] => {
+  const elements: HTMLElement[] = [];
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+
+      if (el.checkVisibility && !el.checkVisibility()) {
+        return;
+      }
+
+      // Optimization: Skip hidden trees early
+      // Note: getComputedStyle is expensive, rely on attributes first for speed
+      if (el.hidden || el.getAttribute("aria-hidden") === "true") return;
+
+      // 2. OPTIMIZATION: Only collecting if it matches our interest list
+      // This restores the efficiency of your original selector!
+      if (el.matches(CANDIDATE_SELECTOR)) {
+        elements.push(el);
+      }
+
+      // MAGIC: Dive into Shadow DOM
+      if (el.shadowRoot) {
+        Array.from(el.shadowRoot.children).forEach((child) => walk(child));
+      }
+    }
+    // Walk children
+    node.childNodes.forEach((child) => walk(child));
+  };
+
+  walk(root);
+  console.log(elements);
+  return elements;
+};
+
+// src/utils/utils.ts
+
+export const computeHierarchy = (el: HTMLElement) => {
+  // 1. Explicit ARIA (Fastest)
+  const ariaPos = el.getAttribute("aria-posinset");
+  const ariaSet = el.getAttribute("aria-setsize");
+  if (ariaPos && ariaSet) {
+    return { pos: { pos: Number(ariaPos), size: Number(ariaSet) } };
+  }
+
+  // 2. Native List Calculation
+  // We look for list items within list containers
+  const listRoles = ["list", "listbox", "menu", "tree", "grid"];
+  const itemRoles = ["listitem", "option", "menuitem", "treeitem", "row"];
+
+  const role = computeRole(el);
+  if (!itemRoles.includes(role)) return { pos: undefined };
+
+  // Find parent container
+  // Note: This is simplified. Real calculation handles nested groups (ul > li > ul).
+  const parent = el.parentElement;
+  if (!parent) return { pos: undefined };
+
+  const parentRole = computeRole(parent);
+  if (
+    listRoles.includes(parentRole) ||
+    parent.tagName === "UL" ||
+    parent.tagName === "OL"
+  ) {
+    // Count accessible siblings
+    const siblings = Array.from(parent.children).filter((child) => {
+      const r = computeRole(child as HTMLElement);
+      return itemRoles.includes(r) || child.tagName === "LI";
+    });
+
+    const index = siblings.indexOf(el) + 1;
+    return { pos: { pos: index, size: siblings.length } };
+  }
+
+  return { pos: undefined };
+};
+
+// REPLACED: The main collector
 export const collectAccTree = (): AccNode[] => {
   const nodes: AccNode[] = [];
 
-  document.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR).forEach((el) => {
+  // 1. Get ALL elements (Light DOM + Shadow DOM)
+  const allElements = getDeepElements(document);
+
+  // 2. Filter and Map
+  allElements.forEach((el) => {
+    // Re-use your existing exposure check (expensive but necessary)
     if (!isExposed(el)) return;
     if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return;
 
     const role = computeRole(el);
 
-    // Avoid duplicate static text inside naming controls (link/button)
+    if (role === "presentation") {
+      return;
+    }
+
+    // Filter out static text inside interactive controls (button/link)
+    // Note: 'closest' doesn't cross Shadow Boundaries, so this is a 'light' check.
+    // For full extension support, we'd need a 'composedClosest' polyfill.
     if (
-      role === "statictext" &&
+      (role === "statictext" || role === "image") &&
       el.closest("a[href],button,[role='link'],[role='button']")
     ) {
       return;
@@ -387,11 +542,21 @@ export const collectAccTree = (): AccNode[] => {
     const name = computeAccName(el);
     const states = computeStates(el);
     const value = computeValue(el);
-    const pos = computePosInSet(el);
-    const coords = computeTableCoords(el);
+    // New Hierarchy Calculation (See Section 2 below)
+    const hierarchy = computeHierarchy(el);
 
+    // Only add if it has semantic meaning
     if (role || name || states.length || value) {
-      nodes.push({ el, role, name, states, value, pos, coords });
+      nodes.push({
+        el,
+        role,
+        name,
+        states,
+        value,
+        // Merge hierarchy into your existing props or add new ones
+        pos: hierarchy.pos,
+        // You can extend AccNode interface to include 'level'
+      });
     }
   });
 

@@ -52,7 +52,9 @@ export default function Example(): JSX.Element {
               <div style={{ display: "grid", gap: 12 }}>
                 {/* (4) Info & Relationships (A): placeholder-as-label; no <label> association */}
                 <div>
-                  <div style={{ marginBottom: 6, fontWeight: 600 }}>Name</div>
+                  <label style={{ marginBottom: 6, fontWeight: 600 }}>
+                    Name
+                  </label>
                   <input
                     id="name" // id not used by any <label htmlFor>
                     style={inputStyle}

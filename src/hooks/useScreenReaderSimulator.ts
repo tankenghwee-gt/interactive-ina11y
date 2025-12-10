@@ -28,6 +28,12 @@ export function useScreenReaderCore({
   const [speechUnlocked, setSpeechUnlocked] = useState(true);
   const [muted, setMuted] = useState(false);
   const [log, setLog] = useState<string[]>([]);
+  const [activeRect, setActiveRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const typingDebounceRef = useRef<number | null>(null);
   const lastEditableElRef = useRef<HTMLElement | null>(null);
 
@@ -212,7 +218,13 @@ export function useScreenReaderCore({
       document
         .querySelectorAll(".srs-focus-ring")
         .forEach((e) => e.classList.remove("srs-focus-ring"));
-      node.el.classList.add("srs-focus-ring");
+      const rect = node.el.getBoundingClientRect();
+      setActiveRect({
+        top: rect.top, // Note: For fixed overlay, use client rect
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      });
       node.el.scrollIntoView({ block: "center", behavior: "smooth" });
       console.log(node);
       // Use LIVE states/value so required/invalid/checked reflect current reality
@@ -224,6 +236,35 @@ export function useScreenReaderCore({
       narrate(formatAnnouncement(live));
     },
     [enabled, nodes, narrate, formatAnnouncement]
+  );
+
+  // Inside useScreenReaderCore, before the useEffect...
+
+  const seek = useCallback(
+    (
+      forward: boolean,
+      typeLabel: string,
+      predicate: (node: AccNode) => boolean
+    ) => {
+      if (!nodes.length) return;
+
+      // Determine start point and direction
+      const step = forward ? 1 : -1;
+      let i = index + step;
+
+      // Loop until we hit the bounds
+      while (i >= 0 && i < nodes.length) {
+        if (nodes[i] && predicate(nodes[i]!)) {
+          focusAt(i);
+          return;
+        }
+        i += step;
+      }
+
+      // If loop finishes without finding anything:
+      narrate(`No ${forward ? "next" : "previous"} ${typeLabel}`);
+    },
+    [nodes, index, focusAt, narrate]
   );
 
   const focusNext = useCallback(() => focusAt(index + 1), [focusAt, index]);
@@ -334,9 +375,13 @@ export function useScreenReaderCore({
         role === "textbox" ||
         role === "combobox");
 
+    // Inside the useEffect that handles keydown...
+
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null;
       const activeIsEditable = isEditable(active);
+
+      // 1. Unmute logic (keep existing)
       if (
         !speechUnlocked &&
         ["ArrowRight", "ArrowLeft", "h", "H", "Enter", " "].includes(e.key)
@@ -346,11 +391,14 @@ export function useScreenReaderCore({
           speak("Screen reader ready", { voice: preferredVoice || undefined });
       }
 
+      // 2. Escape logic (keep existing)
       if (e.key === "Escape") {
         e.preventDefault();
         escapeAction();
         return;
       }
+
+      // 3. Typing Mode (keep existing - CRITICAL so 'b' types 'b' in inputs)
       if (activeIsEditable) {
         const el = active as HTMLInputElement | HTMLTextAreaElement;
 
@@ -399,43 +447,134 @@ export function useScreenReaderCore({
         return;
       }
 
-      switch (e.key) {
-        case "ArrowRight":
+      // 4. SHORTCUTS - The New Logic
+      const forward = !e.shiftKey; // Shift = Previous
+
+      switch (e.key.toLowerCase()) {
+        // Standard Navigation
+        case "arrowright":
           e.preventDefault();
           focusNext();
-          return;
-        case "ArrowLeft":
+          break;
+        case "arrowleft":
           e.preventDefault();
           focusPrev();
-          return;
-        case "h":
-        case "H": {
-          e.preventDefault();
-          if (e.shiftKey) {
-            for (let i = index - 1; i >= 0; i--) {
-              if (nodes[i]?.role === "heading") {
-                focusAt(i);
-                return;
-              }
-            }
-            narrate("No previous heading");
-          } else {
-            for (let i = index + 1; i < nodes.length; i++) {
-              if (nodes[i]?.role === "heading") {
-                focusAt(i);
-                return;
-              }
-            }
-            narrate("No next heading");
-          }
-          return;
-        }
+          break;
+
+        // Activation
         case " ":
-        case "Spacebar":
-        case "Enter":
+        case "enter":
           e.preventDefault();
           activateOrFocus();
-          return;
+          break;
+
+        // --- QUICK KEYS ---
+
+        // Headings (H)
+        case "h":
+          e.preventDefault();
+          seek(forward, "heading", (n) => n.role === "heading");
+          break;
+
+        // Specific Heading Levels (1-6)
+        case "1":
+        case "2":
+        case "3":
+        case "4":
+        case "5":
+        case "6": {
+          e.preventDefault();
+          const level = parseInt(e.key);
+          seek(forward, `heading level ${level}`, (n) => {
+            if (n.role !== "heading") return false;
+            // Check computed level (you might need to update your AccNode to store 'level')
+            // Or re-parse quickly:
+            const ariaLevel = n.el.getAttribute("aria-level");
+            const tagLevel = parseInt(n.el.tagName.substring(1));
+            const actualLevel = ariaLevel ? parseInt(ariaLevel) : tagLevel;
+            return actualLevel === level;
+          });
+          break;
+        }
+
+        // Buttons (B)
+        case "b":
+          e.preventDefault();
+          seek(forward, "button", (n) => n.role === "button");
+          break;
+
+        // Links (L)
+        case "l":
+          e.preventDefault();
+          seek(forward, "link", (n) => n.role === "link");
+          break;
+
+        // Tables (T)
+        case "t":
+          e.preventDefault();
+          seek(
+            forward,
+            "table",
+            (n) => n.role === "table" || n.role === "grid"
+          );
+          break;
+
+        // Graphics (G)
+        case "g":
+          e.preventDefault();
+          seek(
+            forward,
+            "graphic",
+            (n) => n.role === "img" || n.role === "image"
+          );
+          break;
+
+        // Form Controls (F)
+        case "f":
+          e.preventDefault();
+          seek(
+            forward,
+            "form field",
+            (n) =>
+              [
+                "textbox",
+                "combobox",
+                "listbox",
+                "checkbox",
+                "radio button",
+                "switch",
+                "slider",
+                "spinbutton",
+              ].includes(n.role) ||
+              (n.el.tagName === "INPUT" && n.role !== "button")
+          );
+          break;
+
+        // Lists (I) - "Items"
+        case "i":
+          e.preventDefault();
+          seek(
+            forward,
+            "list item",
+            (n) => n.role === "listitem" || n.role === "option"
+          );
+          break;
+
+        // Landmarks (D) - "Definitions/Regions"
+        case "d":
+          e.preventDefault();
+          seek(forward, "landmark", (n) =>
+            [
+              "banner",
+              "main",
+              "navigation",
+              "contentinfo",
+              "complementary",
+              "search",
+              "region",
+            ].includes(n.role)
+          );
+          break;
       }
     };
 
@@ -457,6 +596,7 @@ export function useScreenReaderCore({
     speechUnlocked,
     preferredVoice,
     announceEditableValueSoon,
+    seek,
   ]);
 
   // ---- NEW: sync with native browser focus (e.g., after checkValidity())
@@ -495,12 +635,79 @@ export function useScreenReaderCore({
     return () => window.removeEventListener("focus", onFocus, true);
   }, [enabled, nodes, narrate, formatAnnouncement]);
 
+  // src/hooks/useScreenReaderSimulator.ts
+
+  // Add this useEffect to handle Live Regions and Tree Updates
+  useEffect(() => {
+    if (!enabled) return;
+
+    let updateTimeout: number;
+
+    const observer = new MutationObserver((mutations) => {
+      let shouldRebuildTree = false;
+
+      mutations.forEach((m) => {
+        let target = m.target as HTMLElement;
+
+        if (m.target.nodeType === Node.TEXT_NODE && m.target.parentElement) {
+          target = m.target.parentElement;
+        }
+
+        // Safety: If it's still not an element (e.g., document fragment), skip it
+        if (!(target instanceof Element)) return;
+
+        // 1. Check for Live Region Updates (Immediate Speech)
+        // We look for the closest element with aria-live
+        const liveRegion = target.closest("[aria-live]");
+        if (liveRegion && liveRegion instanceof HTMLElement) {
+          const liveType = liveRegion.getAttribute("aria-live");
+          if (liveType !== "off") {
+            // Wait slightly for text to settle
+            setTimeout(() => {
+              const text = liveRegion.textContent?.trim();
+              if (text && document.activeElement !== liveRegion) {
+                narrate(`Alert: ${text}`);
+              }
+            }, 100);
+          }
+        }
+
+        // 2. Flag for tree rebuild
+        if (
+          m.type === "childList" ||
+          (m.type === "attributes" &&
+            ["hidden", "style", "class"].includes(m.attributeName || ""))
+        ) {
+          shouldRebuildTree = true;
+        }
+      });
+
+      // Debounce the heavy tree rebuild
+      if (shouldRebuildTree) {
+        clearTimeout(updateTimeout);
+        updateTimeout = window.setTimeout(() => {
+          setNodes(collectAccTree());
+        }, 500);
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true, // Watch text changes for live regions
+    });
+
+    return () => observer.disconnect();
+  }, [enabled, narrate]);
+
   return {
     state: {
       nodes,
       index,
       muted,
       log,
+      activeRect,
       current: nodes[index] || null,
       currentAnnouncement: nodes[index]
         ? formatAnnouncement({

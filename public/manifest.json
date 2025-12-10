@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Screen Reader Simulator",
+  "version": "1.0",
+  "description": "A developer tool to visualize accessibility trees.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}

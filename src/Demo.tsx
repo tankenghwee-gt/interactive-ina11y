@@ -1,14 +1,15 @@
 import { useState, type JSX } from "react";
 import { ScreenReaderHUD } from "./components/ScreenReaderHUD";
-import Examples from "./components/Example";
-import ExamplesFixed from "./components/ExampleFixed";
+import Example from "./components/Example";
+import ExampleFixed from "./components/ExampleFixed";
+import ExampleTimed from "./components/ExampleTimed";
 
 // =============================
 // Demo (optional)
 // =============================
 
 interface DemoProps {
-  example: "broken" | "fixed";
+  example: "broken" | "fixed" | "timed";
 }
 
 export default function Demo({ example }: DemoProps): JSX.Element {
@@ -56,15 +57,22 @@ export default function Demo({ example }: DemoProps): JSX.Element {
       ) : (
         <></>
       )}
-      {example === "broken" ? (
+      {example === "broken" && (
         <>
           <ScreenReaderHUD />
-          <Examples />
+          <Example />
         </>
-      ) : (
+      )}
+      {example === "fixed" && (
         <>
           <ScreenReaderHUD />
-          <ExamplesFixed />
+          <ExampleFixed />
+        </>
+      )}
+      {example === "timed" && (
+        <>
+          <ScreenReaderHUD />
+          <ExampleTimed />
         </>
       )}
     </div>
