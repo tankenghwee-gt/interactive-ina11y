@@ -26,7 +26,7 @@ export default function Demo({ example }: DemoProps): JSX.Element {
       <button
         onClick={() => setHideContent(!hideContent)}
         style={{
-          position: "absolute",
+          position: "fixed",
           left: 16,
           top: 16,
           padding: "10px 16px",
@@ -48,7 +48,8 @@ export default function Demo({ example }: DemoProps): JSX.Element {
         <div
           style={{
             position: "absolute",
-            height: "200vh",
+            minHeight: "100vh",
+            height: "100%",
             width: "100vw",
             backgroundColor: "black",
             zIndex: 9,

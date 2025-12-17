@@ -8,7 +8,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
   const [showHelp, setShowHelp] = useState(false); // <--- NEW: Toggle for shortcuts
 
   const {
-    state: { muted, log, activeRect },
+    state: { muted, log },
     actions: { focusPrev, focusNext, activateOrFocus, escapeAction, setMuted },
   } = useScreenReaderCore({ lang: "en-US", enabled: hudOpen });
 
@@ -27,22 +27,6 @@ export function ScreenReaderHUD(): JSX.Element | null {
 
   return (
     <div style={containerStyle} aria-hidden>
-      {activeRect && (
-        <div
-          style={{
-            position: "fixed",
-            top: activeRect.top,
-            left: activeRect.left,
-            width: activeRect.width,
-            height: activeRect.height,
-            outline: "4px solid #7c3aed",
-            outlineOffset: "2px",
-            pointerEvents: "none",
-            zIndex: 99999,
-            transition: "all 0.15s ease-out",
-          }}
-        />
-      )}
       {/* Header */}
       <div style={headerStyle}>
         <strong style={{ fontWeight: 600 }}>Screen Reader</strong>
@@ -235,16 +219,16 @@ const helpGrid: React.CSSProperties = {
 
 const floatingTriggerBtn: React.CSSProperties = {
   position: "fixed",
-  right: 20,
-  top: 20,
-  padding: "12px 20px",
-  background: "#2563eb",
+  right: 16,
+  top: 16,
+  padding: "10px 16px",
+  background: "#7c3aed",
   color: "#fff",
   border: 0,
-  borderRadius: 50,
+  borderRadius: 8,
   cursor: "pointer",
   fontWeight: 600,
-  boxShadow: "0 4px 20px rgba(37, 99, 235, 0.4)",
+  boxShadow: "0 4px 12px rgba(0,0,0,.15)",
   zIndex: 9999,
 };
 
