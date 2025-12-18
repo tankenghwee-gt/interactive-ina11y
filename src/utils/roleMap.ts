@@ -4,7 +4,7 @@ export const ROLE_MAP: Record<string, string> = {
   // --- Interactive ---
   button: "button",
   link: "link",
-  textbox: "edit", // NVDA says "edit", VoiceOver "text field"
+  textbox: "textbox", // NVDA says "edit", VoiceOver "text field"
   searchbox: "search edit",
   checkbox: "checkbox",
   radio: "radio button",

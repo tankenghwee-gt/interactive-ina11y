@@ -1,11 +1,20 @@
+// src/components/ScreenReaderHUD.tsx
 import React, { useState, type JSX } from "react";
 import { useScreenReaderCore } from "../hooks/useScreenReaderSimulator";
-import { HiSpeakerWave, HiSpeakerXMark } from "react-icons/hi2"; // Install react-icons if needed or use text '?'
+import {
+  HiSpeakerWave,
+  HiSpeakerXMark,
+  HiEye,
+  HiEyeSlash,
+  HiQuestionMarkCircle,
+  HiXMark,
+} from "react-icons/hi2";
 import { speak } from "../utils/utils";
 
 export function ScreenReaderHUD(): JSX.Element | null {
   const [hudOpen, setHudOpen] = useState(true);
-  const [showHelp, setShowHelp] = useState(false); // <--- NEW: Toggle for shortcuts
+  const [showHelp, setShowHelp] = useState(false);
+  const [curtainActive, setCurtainActive] = useState(true);
 
   const {
     state: { muted, log },
@@ -18,7 +27,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
         onClick={() => setHudOpen(true)}
         style={floatingTriggerBtn}
         type="button"
-        aria-hidden
+        aria-hidden="true" // Ensure the simulator ignores this
       >
         Open Screen Reader
       </button>
@@ -26,101 +35,144 @@ export function ScreenReaderHUD(): JSX.Element | null {
   }
 
   return (
-    <div style={containerStyle} aria-hidden>
-      {/* Header */}
-      <div style={headerStyle}>
-        <strong style={{ fontWeight: 600 }}>Screen Reader</strong>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {/* HELP TOGGLE */}
-          <button
-            onClick={() => setShowHelp(!showHelp)}
-            style={iconBtn}
-            title="Keyboard Shortcuts"
-            aria-expanded={showHelp}
-          >
-            <span style={{ fontSize: 18, fontWeight: "bold" }}>?</span>
-          </button>
-
-          <button
-            onClick={() => setHudOpen(false)}
-            aria-label="Close"
-            style={iconBtn}
-            type="button"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-
-      {/* --- NEW: SHORTCUTS PANEL --- */}
-      {showHelp && (
-        <div style={helpPanelStyle}>
-          <div style={helpGrid}>
-            <KeyRow k="H" label="Headings" />
-            <KeyRow k="1-6" label="Heading Levels" />
-            <KeyRow k="B" label="Buttons" />
-            <KeyRow k="L" label="Links" />
-            <KeyRow k="F" label="Forms" />
-            <KeyRow k="T" label="Tables" />
-            <KeyRow k="G" label="Graphics" />
-            <KeyRow k="D" label="Landmarks" />
-            <KeyRow k="Space" label="Activate / Toggle" />
-            <KeyRow k="Esc" label="Exit Focus Mode" />
+    <>
+      {/* Screen Curtain Feature */}
+      {curtainActive && (
+        <div style={curtainStyle} aria-hidden="true">
+          <div style={curtainContentStyle}>
+            <h2 style={{ margin: "0 0 8px 0", fontSize: 24 }}>
+              Screen Curtain Active
+            </h2>
+            <p style={{ margin: 0, opacity: 0.8 }}>
+              Visual output is hidden to simulate screen reader usage without
+              sight.
+            </p>
           </div>
-          <small style={{ display: "block", marginTop: 8, color: "#666" }}>
-            Hold <strong>Shift</strong> to move backwards.
-          </small>
         </div>
       )}
 
-      {/* Controls */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 8,
-          padding: 12,
-        }}
-      >
-        <ControlButton label="Previous" sub="Left Arrow" onClick={focusPrev} />
-        <ControlButton label="Next" sub="Right Arrow" onClick={focusNext} />
-        <ControlButton
-          label="Select"
-          sub="Enter/Space"
-          onClick={activateOrFocus}
-          highlight
-        />
-        <ControlButton label="Stop/Esc" sub="Esc" onClick={escapeAction} />
-      </div>
+      {/* Main HUD Container */}
+      <div style={containerStyle} aria-hidden="true">
+        {/* Header */}
+        <div style={headerStyle}>
+          <strong style={{ fontWeight: 600 }}>Screen Reader</strong>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+            {/* Curtain Toggle */}
+            <button
+              onClick={() => setCurtainActive(!curtainActive)}
+              style={{
+                ...iconBtn,
+                color: curtainActive ? "#7c3aed" : "#6b7280",
+              }}
+              title={
+                curtainActive
+                  ? "Disable Screen Curtain"
+                  : "Enable Screen Curtain"
+              }
+              aria-pressed={curtainActive}
+              aria-label="Toggle Screen Curtain"
+            >
+              {curtainActive ? <HiEyeSlash size={18} /> : <HiEye size={18} />}
+            </button>
 
-      {/* Narration Toggle */}
-      <div style={narrationBarStyle}>
-        <strong style={{ fontWeight: 600, fontSize: 13 }}>Speech Output</strong>
-        <button
-          onClick={() => {
-            if (!muted) window.speechSynthesis?.cancel();
-            else speak("Unmuted");
-            setMuted(!muted);
-          }}
-          aria-pressed={muted}
-          className={`srs-mute-btn ${muted ? "is-muted" : ""}`}
-        >
-          {muted ? <HiSpeakerXMark size={18} /> : <HiSpeakerWave size={18} />}
-          <span className="srs-mute-label">
-            {muted ? "Click to unmute" : "Click to mute"}
-          </span>{" "}
-        </button>
-      </div>
+            {/* Help Toggle */}
+            <button
+              onClick={() => setShowHelp(!showHelp)}
+              style={{ ...iconBtn, color: showHelp ? "#7c3aed" : "#6b7280" }}
+              title="Keyboard Shortcuts"
+              aria-expanded={showHelp}
+            >
+              <HiQuestionMarkCircle size={18} />
+            </button>
 
-      {/* Logs */}
-      <div style={logContainerStyle}>
-        {log.length > 0 ? (
-          <Bubble kind="user">{log[0]}</Bubble>
-        ) : (
-          <Bubble kind="user">Narration logs will appear here</Bubble>
+            {/* Close Button */}
+            <button
+              onClick={() => setHudOpen(false)}
+              aria-label="Close"
+              style={iconBtn}
+              type="button"
+            >
+              <HiXMark size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Shortcuts Panel */}
+        {showHelp && (
+          <div style={helpPanelStyle}>
+            <div style={helpGrid}>
+              <KeyRow k="H" label="Headings" />
+              <KeyRow k="1-6" label="Levels" />
+              <KeyRow k="B" label="Buttons" />
+              <KeyRow k="L" label="Links" />
+              <KeyRow k="F" label="Forms" />
+              <KeyRow k="T" label="Tables" />
+              <KeyRow k="G" label="Graphics" />
+              <KeyRow k="D" label="Landmarks" />
+              <KeyRow k="Space" label="Activate" />
+              <KeyRow k="Esc" label="Exit Focus" />
+            </div>
+            <small style={{ display: "block", marginTop: 8, color: "#666" }}>
+              <strong>Shift</strong> + Key to move backwards.
+            </small>
+          </div>
         )}
+
+        {/* Controls */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            padding: 12,
+          }}
+        >
+          <ControlButton
+            label="Previous"
+            sub="Left Arrow"
+            onClick={focusPrev}
+          />
+          <ControlButton label="Next" sub="Right Arrow" onClick={focusNext} />
+          <ControlButton
+            label="Select"
+            sub="Enter/Space"
+            onClick={activateOrFocus}
+            highlight
+          />
+          <ControlButton label="Stop/Esc" sub="Esc" onClick={escapeAction} />
+        </div>
+
+        {/* Narration Toggle */}
+        <div style={narrationBarStyle}>
+          <strong style={{ fontWeight: 600, fontSize: 13 }}>
+            Speech Output
+          </strong>
+          <button
+            onClick={() => {
+              if (!muted) window.speechSynthesis?.cancel();
+              else speak("Unmuted");
+              setMuted(!muted);
+            }}
+            aria-pressed={muted}
+            className={`srs-mute-btn ${muted ? "is-muted" : ""}`}
+          >
+            {muted ? <HiSpeakerXMark size={18} /> : <HiSpeakerWave size={18} />}
+            <span className="srs-mute-label">
+              {muted ? "Click to unmute" : "Click to mute"}
+            </span>{" "}
+          </button>
+        </div>
+
+        {/* Logs */}
+        <div style={logContainerStyle}>
+          {log.length > 0 ? (
+            <Bubble kind="user">{log[0]}</Bubble>
+          ) : (
+            <Bubble kind="user">Narration logs will appear here</Bubble>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -194,7 +246,7 @@ const containerStyle: React.CSSProperties = {
   top: 20,
   width: 340,
   maxHeight: "85vh",
-  zIndex: 2147483647,
+  zIndex: 2147483647, // Topmost
   background: "#fff",
   borderRadius: 16,
   boxShadow: "0 20px 50px rgba(0,0,0,.3), 0 0 0 1px rgba(0,0,0,.05)",
@@ -202,7 +254,29 @@ const containerStyle: React.CSSProperties = {
   fontSize: 14,
   display: "flex",
   flexDirection: "column",
-  overflow: "hidden", // Important for internal scrolling
+  overflow: "hidden",
+};
+
+// New Style for Curtain
+const curtainStyle: React.CSSProperties = {
+  position: "fixed",
+  top: 0,
+  left: 0,
+  width: "100vw",
+  height: "100vh",
+  background: "#000",
+  color: "#f3f4f6",
+  zIndex: 2147483646, // Just below the HUD
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  pointerEvents: "auto", // Blocks clicks to underlying page
+};
+
+const curtainContentStyle: React.CSSProperties = {
+  textAlign: "center",
+  maxWidth: 400,
+  padding: 20,
 };
 
 const helpPanelStyle: React.CSSProperties = {
@@ -245,11 +319,12 @@ const iconBtn: React.CSSProperties = {
   background: "transparent",
   color: "#6b7280",
   cursor: "pointer",
-  padding: 4,
-  borderRadius: 4,
+  padding: 8, // Larger hit area
+  borderRadius: 6,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
+  transition: "background 0.2s, color 0.2s",
 };
 
 const narrationBarStyle: React.CSSProperties = {
@@ -264,7 +339,7 @@ const narrationBarStyle: React.CSSProperties = {
 const logContainerStyle: React.CSSProperties = {
   padding: "12px",
   overflowY: "auto",
-  flex: 1, // Takes remaining height
+  flex: 1,
   display: "flex",
   flexDirection: "column",
   gap: 8,

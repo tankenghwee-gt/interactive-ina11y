@@ -6,8 +6,20 @@ import {
 } from "dom-accessibility-api";
 
 // =============================
-// Speech engine
+// 1. Speech & Types
 // =============================
+
+export interface AccNode {
+  el: HTMLElement;
+  role: string;
+  name: string;
+  description?: string;
+  value?: string;
+  states: string[];
+  pos?: { pos: number; size: number };
+  coords?: { row: number; col: number };
+}
+
 export const speak = (
   text: string,
   opts?: {
@@ -36,21 +48,7 @@ export const speak = (
 };
 
 // =============================
-// Types
-// =============================
-export interface AccNode {
-  el: HTMLElement;
-  role: string;
-  name: string;
-  description?: string;
-  value?: string;
-  states: string[];
-  pos?: { pos: number; size: number };
-  coords?: { row: number; col: number };
-}
-
-// =============================
-// Type Guards
+// 2. DOM Query Helpers
 // =============================
 
 type DisableableElement =
@@ -78,86 +76,69 @@ const isCheckable = (el: HTMLElement): el is HTMLInputElement => {
   return el instanceof HTMLInputElement;
 };
 
-// =============================
-// Accessibility Helpers
-// =============================
-
 /**
  * Determines if an element is hidden from the accessibility tree.
  */
 const isHidden = (el: HTMLElement): boolean => {
+  // 1. Critical: aria-hidden hides the subtree, regardless of CSS.
+  if (el.closest("[aria-hidden='true']")) return true;
+
+  // 2. Native CSS check (modern & fast)
   if (el.checkVisibility) {
     return !el.checkVisibility({
-      checkOpacity: false,
-      checkVisibilityCSS: true,
+      checkOpacity: false, // SRs read transparent elements usually
+      checkVisibilityCSS: true, // respects display:none/visibility:hidden
     });
   }
-  // Fallback
-  if (el.hidden || el.getAttribute("aria-hidden") === "true") return true;
+
+  // 3. Fallback for older environments
+  if (el.hidden) return true;
   const style = window.getComputedStyle(el);
-  return style.display === "none" || style.visibility === "hidden";
+  if (style.display === "none" || style.visibility === "hidden") return true;
+
+  // 4. Inert check (not interactive, often hidden from AT)
+  if (el.closest("[inert]")) return true;
+
+  return false;
 };
 
-/**
- * Checks if an element is natively focusable or made focusable.
- */
 const isFocusable = (el: HTMLElement): boolean => {
   if (el.tabIndex >= 0) return true;
   const t = el.tagName.toLowerCase();
-
-  // Native interactive elements (unless disabled)
   if (["button", "input", "select", "textarea"].includes(t)) {
     if (isDisableable(el) && el.disabled) return false;
     return true;
   }
-
   if (t === "a" && (el as HTMLAnchorElement).href) return true;
   return false;
 };
 
-/**
- * Gets the direct text content of an element, ignoring child elements.
- */
 const getDirectText = (el: HTMLElement): string => {
   let text = "";
-  for (let i = 0; i < el.childNodes.length; i++) {
-    const node = el.childNodes[i];
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.textContent || "";
-    }
-  }
+  el.childNodes.forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE) text += node.textContent || "";
+  });
   return text.trim().replace(/\s+/g, " ");
 };
 
 /**
- * Computes the effective role.
- * Downgrades "generic" to "statictext" if it contains text.
+ * Robust role computation that handles "Generic" containers with text.
  */
 const computeEffectiveRole = (el: HTMLElement): string => {
-  const role = getSafeRole(el); // Standard lookup
-
-  // If role is generic (or null), but it has text, it's NOT just a wrapper.
+  const role = getSafeRole(el);
   if (!role || role === "generic" || role === "presentation") {
-    if (hasDirectText(el)) {
-      return "statictext";
-    }
-    return "generic"; // Truly empty wrapper
+    if (hasDirectText(el)) return "statictext";
+    return "generic";
   }
-
   return role;
 };
 
-/**
- * Checks if an element has non-empty direct text nodes.
- * This is crucial for identifying "generic" containers that actually hold content.
- */
 const hasDirectText = (el: HTMLElement): boolean => {
   for (let i = 0; i < el.childNodes.length; i++) {
     const node = el.childNodes[i];
     if (
       node.nodeType === Node.TEXT_NODE &&
-      node.textContent?.trim().length &&
-      node.textContent?.trim().length > 0
+      (node.textContent?.trim().length ?? 0) > 0
     ) {
       return true;
     }
@@ -166,21 +147,21 @@ const hasDirectText = (el: HTMLElement): boolean => {
 };
 
 // =============================
-// State & Property Computations
+// 3. Attribute Computation
 // =============================
 
 export const computeStates = (el: HTMLElement, role: string): string[] => {
   const states: string[] = [];
   const attr = (n: string) => el.getAttribute(n);
 
-  // --- Global States ---
+  // --- Disabled ---
   if (attr("aria-disabled") === "true") {
     states.push("disabled");
   } else if (isDisableable(el) && el.disabled) {
     states.push("disabled");
   }
 
-  // Checked / Selected / Pressed
+  // --- Checked / Selected ---
   const ariaChecked = attr("aria-checked");
   const nativeChecked = isCheckable(el) ? el.checked : null;
 
@@ -200,7 +181,7 @@ export const computeStates = (el: HTMLElement, role: string): string[] => {
   if (attr("aria-expanded") === "true") states.push("expanded");
   if (attr("aria-expanded") === "false") states.push("collapsed");
 
-  // Invalid
+  // --- Invalid ---
   if (attr("aria-invalid") === "true") {
     states.push("invalid");
   } else if (
@@ -211,15 +192,17 @@ export const computeStates = (el: HTMLElement, role: string): string[] => {
     states.push("invalid");
   }
 
-  // --- Role Specific ---
-  if (role === "heading") {
-    const level = attr("aria-level") || el.tagName.substring(1);
-    if (/^[1-6]$/.test(level)) states.push(`level ${level}`);
-  }
-
   if (["columnheader", "rowheader"].includes(role)) {
     const sort = attr("aria-sort");
     if (sort && sort !== "none") states.push(`sort ${sort}`);
+  }
+
+  // Orientation
+  if (
+    ["slider", "scrollbar", "separator", "tablist", "toolbar"].includes(role)
+  ) {
+    const orientation = attr("aria-orientation");
+    if (orientation) states.push(orientation);
   }
 
   if (
@@ -264,7 +247,6 @@ export const computeValue = (
     el instanceof HTMLSelectElement
   ) {
     if (el.type === "password") return "••••••";
-    // Checkbox/Radio value is usually not read, just state.
     if (["checkbox", "radio"].includes(el.type)) return undefined;
     return el.value;
   }
@@ -272,8 +254,51 @@ export const computeValue = (
   return undefined;
 };
 
+export const computeHierarchy = (
+  el: HTMLElement,
+  role: string
+): { pos: number; size: number } | undefined => {
+  const ariaPos = el.getAttribute("aria-posinset");
+  const ariaSet = el.getAttribute("aria-setsize");
+  if (ariaPos && ariaSet) {
+    return { pos: Number(ariaPos), size: Number(ariaSet) };
+  }
+
+  if (["listitem", "option", "menuitem", "radio"].includes(role)) {
+    const parent = el.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter((c) => {
+        if (role === "listitem" && c.tagName === "LI") return true;
+        if (role === "option" && c.tagName === "OPTION") return true;
+        return getSafeRole(c as HTMLElement) === role;
+      });
+      const index = siblings.indexOf(el);
+      if (index !== -1) {
+        return { pos: index + 1, size: siblings.length };
+      }
+    }
+  }
+  return undefined;
+};
+
+export const computeTableCoords = (
+  el: HTMLElement
+): { row: number; col: number } | undefined => {
+  const cell = el.closest("td,th") as HTMLElement | null;
+  if (!cell) return undefined;
+
+  const rowEl = cell.parentElement as HTMLTableRowElement;
+  const tableEl = rowEl?.closest("table");
+  if (tableEl && rowEl) {
+    const rowIndex = Array.from(tableEl.rows).indexOf(rowEl) + 1;
+    const colIndex = Array.from(rowEl.children).indexOf(cell) + 1;
+    return { row: rowIndex, col: colIndex };
+  }
+  return undefined;
+};
+
 // =============================
-// Tree Traversal (TreeWalker)
+// 4. Tree Traversal & De-duplication
 // =============================
 
 const createAccWalker = (root: Node) => {
@@ -285,6 +310,53 @@ const createAccWalker = (root: Node) => {
   });
 };
 
+/**
+ * NEW: Consolidates the accessibility tree to mimic Screen Reader "Group" behavior.
+ * Specifically, it removes static text nodes that are actually labels for
+ * a subsequent interactive element, preventing double readout ("Name" ... "Name, edit").
+ */
+const consolidateTree = (nodes: AccNode[]): AccNode[] => {
+  // 1. Identify all interactive nodes to see who is labelled
+  const interactiveNodes = new Set(nodes.map((n) => n.el));
+
+  // 2. Filter loop
+  return nodes.filter((node) => {
+    const el = node.el;
+
+    // Check if this node is a LABEL element
+    if (el.tagName === "LABEL") {
+      // Case A: <label for="id">
+      const forId = el.getAttribute("for");
+      if (forId) {
+        const target = document.getElementById(forId);
+        if (target && interactiveNodes.has(target)) {
+          // The target is in our tree. The SR will read the target's name (which comes from this label).
+          // We should hide this label node to prevent redundancy.
+          return false;
+        }
+      }
+
+      // Case B: <label><input /></label> (Implicit wrapping)
+      // If the label contains an interactive element that is ALSO in our list,
+      // we generally want to skip the label wrapper in favor of the input inside it.
+      // (The input will have the label text as its accessible name).
+      const implicitTarget = el.querySelector(
+        "input, select, textarea, button"
+      );
+      if (
+        implicitTarget &&
+        interactiveNodes.has(implicitTarget as HTMLElement)
+      ) {
+        return false;
+      }
+    }
+
+    // Determine if this is a "Label" via aria-labelledby (Reverse lookup is expensive, skipping for simulator v1)
+
+    return true;
+  });
+};
+
 const collectNodesRecursively = (root: Node, nodes: AccNode[]): void => {
   const walker = createAccWalker(root);
 
@@ -292,19 +364,15 @@ const collectNodesRecursively = (root: Node, nodes: AccNode[]): void => {
   while (currentNode) {
     const el = currentNode as HTMLElement;
 
-    // 1. Analyze role
+    // 1. Identification
     const role = computeEffectiveRole(el);
 
-    // 2. Filter out pure layout wrappers
-    // We keep it if it has a semantic role, OR it's focusable, OR it's static text
+    // 2. Filter: Skip layout noise
     const isGeneric =
       role === "generic" || role === "presentation" || role === "none";
     const focusable = isFocusable(el);
     const isText =
       role === "statictext" || role === "paragraph" || role === "heading";
-
-    // 3. Special roles that must be included even if "empty" (no text/name)
-    //    (e.g. an image with missing alt text is a bug, but it exists in the tree as "img")
     const isSelfContained =
       role === "img" ||
       role === "image" ||
@@ -313,9 +381,10 @@ const collectNodesRecursively = (root: Node, nodes: AccNode[]): void => {
       role === "hr";
 
     if (!isGeneric || focusable || isSelfContained) {
+      // 3. Computation
       let name = computeAccessibleName(el);
 
-      // Fallback for static content where name computation returns empty
+      // Fallback: If no label, read the content (critical for divs with text)
       if (!name && (isText || role === "statictext")) {
         name = getDirectText(el);
       }
@@ -323,10 +392,28 @@ const collectNodesRecursively = (root: Node, nodes: AccNode[]): void => {
       const description = computeAccessibleDescription(el);
       const states = computeStates(el, role);
       const value = computeValue(el, role);
+      const hierarchy = computeHierarchy(el, role);
+      const coords = computeTableCoords(el);
 
-      // Final Check:
-      // It must be interactive, OR have content (name/value), OR be a self-contained semantic element
-      if (name || value || focusable || states.length > 0 || isSelfContained) {
+      console.log({
+        el,
+        role,
+        name,
+        description,
+        states,
+        value,
+        pos: hierarchy,
+        coords,
+      });
+
+      if (
+        name ||
+        value ||
+        focusable ||
+        states.length > 0 ||
+        isSelfContained ||
+        hierarchy
+      ) {
         nodes.push({
           el,
           role,
@@ -334,11 +421,13 @@ const collectNodesRecursively = (root: Node, nodes: AccNode[]): void => {
           description,
           states,
           value,
+          pos: hierarchy,
+          coords,
         });
       }
     }
 
-    // 4. Dive into Shadow DOM
+    // 5. Shadow DOM Recursion
     if (el.shadowRoot) {
       collectNodesRecursively(el.shadowRoot, nodes);
     }
@@ -350,5 +439,6 @@ const collectNodesRecursively = (root: Node, nodes: AccNode[]): void => {
 export const collectAccTree = (): AccNode[] => {
   const nodes: AccNode[] = [];
   collectNodesRecursively(document, nodes);
-  return nodes;
+  // Apply the de-duplication logic
+  return consolidateTree(nodes);
 };

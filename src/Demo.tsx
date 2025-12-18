@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { type JSX } from "react";
 import { ScreenReaderHUD } from "./components/ScreenReaderHUD";
 import Example from "./components/Example";
 import ExampleFixed from "./components/ExampleFixed";
@@ -13,7 +13,6 @@ interface DemoProps {
 }
 
 export default function Demo({ example }: DemoProps): JSX.Element {
-  const [hideContent, setHideContent] = useState<boolean>(true);
   return (
     <div
       style={{
@@ -23,41 +22,6 @@ export default function Demo({ example }: DemoProps): JSX.Element {
         padding: "0 16px",
       }}
     >
-      <button
-        onClick={() => setHideContent(!hideContent)}
-        style={{
-          position: "fixed",
-          left: 16,
-          top: 16,
-          padding: "10px 16px",
-          background: "#7c3aed",
-          color: "#fff",
-          border: 0,
-          borderRadius: 8,
-          cursor: "pointer",
-          fontWeight: 600,
-          boxShadow: "0 4px 12px rgba(0,0,0,.15)",
-          zIndex: 9999,
-        }}
-        type="button"
-        name={`Turn ${hideContent ? "off" : "on"} simulation`}
-      >
-        {`Turn ${hideContent ? "off" : "on"} simulation`}
-      </button>
-      {hideContent ? (
-        <div
-          style={{
-            position: "absolute",
-            minHeight: "100vh",
-            height: "100%",
-            width: "100vw",
-            backgroundColor: "black",
-            zIndex: 9,
-          }}
-        />
-      ) : (
-        <></>
-      )}
       {example === "broken" && (
         <>
           <ScreenReaderHUD />

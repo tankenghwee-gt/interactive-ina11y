@@ -7,6 +7,7 @@ import {
   computeStates,
   computeValue,
 } from "../utils/utils";
+import { ROLE_MAP } from "../utils/roleMap"; // <--- Import the map
 
 type CoreOptions = {
   lang?: string;
@@ -28,8 +29,6 @@ export function useScreenReaderCore({
   const [speechUnlocked, setSpeechUnlocked] = useState(true);
   const [muted, setMuted] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-
-  // REMOVED: activeRect state
 
   const typingDebounceRef = useRef<number | null>(null);
   const lastEditableElRef = useRef<HTMLElement | null>(null);
@@ -96,7 +95,8 @@ export function useScreenReaderCore({
   // ---- Format announcement (VO-ish)
   const formatAnnouncement = useCallback((node: AccNode): string => {
     const parts: string[] = [];
-    // For checkable roles, surface state early
+
+    // For checkable roles, surface state early (Checked Checkbox vs Checkbox)
     if (["checkbox", "radio button", "switch"].includes(node.role)) {
       const checkState = node.states.find((s) =>
         /checked|unchecked|selected/.test(s)
@@ -107,8 +107,9 @@ export function useScreenReaderCore({
     // Name
     if (node.name) parts.push(`"${node.name}"`);
 
-    // Role
+    // Role (Refactored to use ROLE_MAP)
     if (node.role && node.role !== "statictext") {
+      // Special logic for Heading to include Levels
       if (node.role === "heading") {
         const levelAttr = node.el.getAttribute("aria-level");
         let level: number | undefined;
@@ -120,20 +121,18 @@ export function useScreenReaderCore({
           if (/^h[1-6]$/.test(t)) level = parseInt(t[1]!, 10);
         }
         parts.push(`Heading${level ? ` level ${level}` : ""}`);
-      } else {
+      }
+      // General Mapping
+      else {
+        const mappedRole = ROLE_MAP[node.role] || node.role;
+        // Capitalize sentence case for speech
         const roleLabel =
-          node.role === "radio button"
-            ? "Radio button"
-            : node.role === "checkbox"
-            ? "Checkbox"
-            : node.role === "switch"
-            ? "Switch"
-            : node.role.charAt(0).toUpperCase() + node.role.slice(1);
+          mappedRole.charAt(0).toUpperCase() + mappedRole.slice(1);
         parts.push(roleLabel);
       }
     }
 
-    // Description (New from utils refactor)
+    // Description
     if (node.description) {
       parts.push(node.description);
     }
@@ -229,7 +228,6 @@ export function useScreenReaderCore({
       console.log(node);
 
       // Use LIVE states/value so required/invalid/checked reflect current reality
-      // Updated: Passing node.role to compute functions as per new utils signature
       const live: AccNode = {
         ...node,
         states: computeStates(node.el, node.role),
