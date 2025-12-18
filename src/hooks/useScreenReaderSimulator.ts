@@ -47,7 +47,6 @@ const formatAnnouncement = (node: AccNode): string => {
   // 5. Value / Placeholder
   if (node.role === "textbox" || node.role === "combobox") {
     const el = node.el as HTMLInputElement | HTMLTextAreaElement;
-    // Password Safety: Don't read raw value here
     if (el.type === "password") {
       parts.push("Password field");
     } else if (el.value?.trim()) {
@@ -57,7 +56,7 @@ const formatAnnouncement = (node: AccNode): string => {
     }
   }
 
-  // 6. Validation Error Messages (Validation Support)
+  // 6. Validation Error Messages
   if (node.states.includes("invalid")) {
     const el = node.el as HTMLInputElement;
     if (el.validationMessage) {
@@ -219,7 +218,7 @@ function useLiveTree(enabled: boolean, onAlert: (text: string) => void) {
     });
 
     return () => observer.disconnect();
-  }, [enabled, onAlert]);
+  }, [enabled, onAlert]); // <--- onAlert must be stable to prevent loops!
 
   return { nodes, forceRefresh };
 }
@@ -241,7 +240,7 @@ export function useScreenReaderCore({
   keyboard = true,
   enabled = true,
 }: CoreOptions = {}) {
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(-1);
   const [log, setLog] = useState<string[]>([]);
 
   // -- Composition --
@@ -255,9 +254,15 @@ export function useScreenReaderCore({
     [logCallback]
   );
 
-  const { nodes, forceRefresh } = useLiveTree(enabled, (alert) =>
-    narrate(alert, handleLog)
+  // FIX: Stabilize the alert callback to prevent useLiveTree effect loops
+  const handleAlert = useCallback(
+    (alert: string) => {
+      narrate(alert, handleLog);
+    },
+    [narrate, handleLog]
   );
+
+  const { nodes, forceRefresh } = useLiveTree(enabled, handleAlert);
 
   // -- Focus Logic --
   const focusAt = useCallback(
@@ -370,7 +375,6 @@ export function useScreenReaderCore({
   }, [enabled, nodes, index]);
 
   // -- Input Typing Echo --
-  // -- Input Typing Echo --
   const typingDebounce = useRef<number | null>(null);
 
   const handleTyping = useCallback(
@@ -381,7 +385,7 @@ export function useScreenReaderCore({
       const isPassword =
         el instanceof HTMLInputElement && el.type === "password";
 
-      let shouldAnnounceValue = false; // Only announce full value on changes
+      let shouldAnnounceValue = false;
 
       // 1. Navigation & Deletion Feedback
       if (isInput) {
@@ -394,6 +398,8 @@ export function useScreenReaderCore({
           if (idx > 0) {
             const char = val[idx - 1];
             narrate(isPassword ? "star" : char, handleLog);
+          } else {
+            narrate("Backspace", handleLog);
           }
           shouldAnnounceValue = true; // Content changed
         } else if (e.key === "ArrowLeft") {
@@ -409,6 +415,8 @@ export function useScreenReaderCore({
           if (idx < val.length) {
             const char = val[idx];
             narrate(isPassword ? "star" : char, handleLog);
+          } else {
+            narrate("Delete", handleLog);
           }
           shouldAnnounceValue = true; // Content changed
         } else if (e.key === "ArrowRight") {
@@ -433,7 +441,6 @@ export function useScreenReaderCore({
       }
 
       // 3. Debounced Value Announcement
-      // Only runs if the action changed the value (Typing/Deletion)
       if (shouldAnnounceValue) {
         if (typingDebounce.current) clearTimeout(typingDebounce.current);
         typingDebounce.current = window.setTimeout(() => {
@@ -448,6 +455,7 @@ export function useScreenReaderCore({
     },
     [narrate, handleLog]
   );
+
   // -- Keyboard Listener --
   useEffect(() => {
     if (!keyboard || !enabled) return;
@@ -545,6 +553,7 @@ export function useScreenReaderCore({
     activateOrFocus,
     escapeAction,
     handleTyping,
+    setUnlocked,
   ]);
 
   // -- Native Focus Sync --
