@@ -13,7 +13,7 @@ import { speak } from "../utils/utils";
 
 export function ScreenReaderHUD(): JSX.Element | null {
   const [hudOpen, setHudOpen] = useState(true);
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState(true);
   const [curtainActive, setCurtainActive] = useState(true);
 
   const {
@@ -102,7 +102,6 @@ export function ScreenReaderHUD(): JSX.Element | null {
           <div style={helpPanelStyle}>
             <div style={helpGrid}>
               <KeyRow k="H" label="Headings" />
-              <KeyRow k="1-6" label="Levels" />
               <KeyRow k="B" label="Buttons" />
               <KeyRow k="L" label="Links" />
               <KeyRow k="F" label="Forms" />
