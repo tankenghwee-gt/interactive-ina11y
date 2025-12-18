@@ -1,5 +1,5 @@
 // src/components/ScreenReaderHUD.tsx
-import React, { useState, type JSX } from "react";
+import React, { useState, useEffect, useRef, type JSX } from "react";
 import { useScreenReaderCore } from "../hooks/useScreenReaderSimulator";
 import {
   HiSpeakerWave,
@@ -13,21 +13,53 @@ import { speak } from "../utils/utils";
 
 export function ScreenReaderHUD(): JSX.Element | null {
   const [hudOpen, setHudOpen] = useState(true);
-  const [showHelp, setShowHelp] = useState(true);
-  const [curtainActive, setCurtainActive] = useState(true);
+  const [showHelp, setShowHelp] = useState(false); // Default closed on mobile
+  const [curtainActive, setCurtainActive] = useState(false);
+
+  // Ref for the fixed container
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const {
     state: { muted, log },
     actions: { focusPrev, focusNext, activateOrFocus, escapeAction, setMuted },
   } = useScreenReaderCore({ lang: "en-US", enabled: hudOpen });
 
+  // === BEST PRACTICE: Dynamic Body Padding ===
+  // This ensures the page content is never hidden behind the fixed HUD.
+  useEffect(() => {
+    if (!hudOpen || !containerRef.current) {
+      document.body.style.paddingBottom = "";
+      return;
+    }
+
+    const updatePadding = () => {
+      if (containerRef.current) {
+        const height = containerRef.current.offsetHeight;
+        // Add a little extra buffer (20px) for aesthetics
+        document.body.style.paddingBottom = `${height + 20}px`;
+      }
+    };
+
+    // 1. Initial measurement
+    updatePadding();
+
+    // 2. Watch for size changes (e.g. expanding help menu, logs wrapping)
+    const observer = new ResizeObserver(() => updatePadding());
+    observer.observe(containerRef.current);
+
+    return () => {
+      observer.disconnect();
+      document.body.style.paddingBottom = ""; // Cleanup on unmount
+    };
+  }, [hudOpen, showHelp, log]); // Re-run if visibility or content changes
+
   if (!hudOpen) {
     return (
       <button
         onClick={() => setHudOpen(true)}
-        style={floatingTriggerBtn}
+        className="srs-mobile-trigger"
         type="button"
-        aria-hidden="true" // Ensure the simulator ignores this
+        aria-hidden="true"
       >
         Open Screen Reader
       </button>
@@ -36,7 +68,6 @@ export function ScreenReaderHUD(): JSX.Element | null {
 
   return (
     <>
-      {/* Screen Curtain Feature */}
       {curtainActive && (
         <div style={curtainStyle} aria-hidden="true">
           <div style={curtainContentStyle}>
@@ -51,48 +82,38 @@ export function ScreenReaderHUD(): JSX.Element | null {
         </div>
       )}
 
-      {/* Main HUD Container */}
-      <div style={containerStyle} aria-hidden="true">
+      {/* Attach ref here to measure height */}
+      <div ref={containerRef} className="srs-hud-container" aria-hidden="true">
         {/* Header */}
         <div style={headerStyle}>
           <strong style={{ fontWeight: 600 }}>Screen Reader</strong>
           <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            {/* Curtain Toggle */}
             <button
               onClick={() => setCurtainActive(!curtainActive)}
               style={{
                 ...iconBtn,
                 color: curtainActive ? "#7c3aed" : "#6b7280",
               }}
-              title={
-                curtainActive
-                  ? "Disable Screen Curtain"
-                  : "Enable Screen Curtain"
-              }
-              aria-pressed={curtainActive}
-              aria-label="Toggle Screen Curtain"
+              title="Toggle Screen Curtain"
             >
-              {curtainActive ? <HiEyeSlash size={18} /> : <HiEye size={18} />}
+              {curtainActive ? <HiEyeSlash size={20} /> : <HiEye size={20} />}
             </button>
 
-            {/* Help Toggle */}
             <button
               onClick={() => setShowHelp(!showHelp)}
               style={{ ...iconBtn, color: showHelp ? "#7c3aed" : "#6b7280" }}
               title="Keyboard Shortcuts"
-              aria-expanded={showHelp}
             >
-              <HiQuestionMarkCircle size={18} />
+              <HiQuestionMarkCircle size={20} />
             </button>
 
-            {/* Close Button */}
             <button
               onClick={() => setHudOpen(false)}
               aria-label="Close"
               style={iconBtn}
               type="button"
             >
-              <HiXMark size={18} />
+              <HiXMark size={20} />
             </button>
           </div>
         </div>
@@ -102,7 +123,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
           <div style={helpPanelStyle}>
             <div style={helpGrid}>
               <KeyRow k="H" label="Headings" />
-              <KeyRow k="B" label="Buttons" />
+              <KeyRow k="B" label="Buttons" />{" "}
               {/* <KeyRow k="T" label="Tables" />
               <KeyRow k="L" label="Links" /> */}
               <KeyRow k="F" label="Forms" />
@@ -128,17 +149,17 @@ export function ScreenReaderHUD(): JSX.Element | null {
         >
           <ControlButton
             label="Previous"
-            sub="Left Arrow"
+            sub="Swipe Left"
             onClick={focusPrev}
           />
-          <ControlButton label="Next" sub="Right Arrow" onClick={focusNext} />
+          <ControlButton label="Next" sub="Swipe Right" onClick={focusNext} />
           <ControlButton
             label="Select"
-            sub="Enter/Space"
+            sub="Double Tap"
             onClick={activateOrFocus}
             highlight
           />
-          <ControlButton label="Stop/Esc" sub="Esc" onClick={escapeAction} />
+          <ControlButton label="Stop" sub="Esc" onClick={escapeAction} />
         </div>
 
         {/* Narration Toggle */}
@@ -157,7 +178,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
           >
             {muted ? <HiSpeakerXMark size={18} /> : <HiSpeakerWave size={18} />}
             <span className="srs-mute-label">
-              {muted ? "Click to unmute" : "Click to mute"}
+              {muted ? "Unmute" : "Mute"}
             </span>{" "}
           </button>
         </div>
@@ -175,7 +196,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
   );
 }
 
-// --- SUBCOMPONENTS ---
+// --- SUBCOMPONENTS & STYLES ---
 
 function KeyRow({ k, label }: { k: string; label: string }) {
   return (
@@ -237,26 +258,6 @@ function Bubble({
   );
 }
 
-// --- STYLES ---
-
-const containerStyle: React.CSSProperties = {
-  position: "fixed",
-  right: 20,
-  top: 20,
-  width: 340,
-  maxHeight: "85vh",
-  zIndex: 2147483647, // Topmost
-  background: "#fff",
-  borderRadius: 16,
-  boxShadow: "0 20px 50px rgba(0,0,0,.3), 0 0 0 1px rgba(0,0,0,.05)",
-  fontFamily: "system-ui, sans-serif",
-  fontSize: 14,
-  display: "flex",
-  flexDirection: "column",
-  overflow: "hidden",
-};
-
-// New Style for Curtain
 const curtainStyle: React.CSSProperties = {
   position: "fixed",
   top: 0,
@@ -265,11 +266,11 @@ const curtainStyle: React.CSSProperties = {
   height: "100vh",
   background: "#000",
   color: "#f3f4f6",
-  zIndex: 2147483646, // Just below the HUD
+  zIndex: 2147483646,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  pointerEvents: "auto", // Blocks clicks to underlying page
+  pointerEvents: "auto",
 };
 
 const curtainContentStyle: React.CSSProperties = {
@@ -290,21 +291,6 @@ const helpGrid: React.CSSProperties = {
   gap: "8px 24px",
 };
 
-const floatingTriggerBtn: React.CSSProperties = {
-  position: "fixed",
-  right: 16,
-  top: 16,
-  padding: "10px 16px",
-  background: "#7c3aed",
-  color: "#fff",
-  border: 0,
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  boxShadow: "0 4px 12px rgba(0,0,0,.15)",
-  zIndex: 9999,
-};
-
 const headerStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -318,12 +304,11 @@ const iconBtn: React.CSSProperties = {
   background: "transparent",
   color: "#6b7280",
   cursor: "pointer",
-  padding: 8, // Larger hit area
+  padding: 8,
   borderRadius: 6,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  transition: "background 0.2s, color 0.2s",
 };
 
 const narrationBarStyle: React.CSSProperties = {

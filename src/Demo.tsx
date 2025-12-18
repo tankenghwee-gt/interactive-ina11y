@@ -19,27 +19,12 @@ export default function Demo({ example }: DemoProps): JSX.Element {
         position: "relative",
         display: "flex",
         justifyContent: "center",
-        padding: "0 16px",
       }}
     >
-      {example === "broken" && (
-        <>
-          <ScreenReaderHUD />
-          <Example />
-        </>
-      )}
-      {example === "fixed" && (
-        <>
-          <ScreenReaderHUD />
-          <ExampleFixed />
-        </>
-      )}
-      {example === "timed" && (
-        <>
-          <ScreenReaderHUD />
-          <ExampleTimed />
-        </>
-      )}
+      <ScreenReaderHUD />
+      {example === "broken" && <Example />}
+      {example === "fixed" && <ExampleFixed />}
+      {example === "timed" && <ExampleTimed />}
     </div>
   );
 }

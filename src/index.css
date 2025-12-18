@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+/* ... existing styles ... */
+
 .srs-mute-btn {
   display: flex;
   align-items: center;
@@ -40,6 +42,8 @@
   border: 1px solid #e5e7eb;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* ... existing button styles ... */
 .srs-btn {
   display: flex;
   flex-direction: column;
@@ -53,9 +57,13 @@
   background: #ede9fe;
   color: #1f2937;
   font-weight: 600;
+  touch-action: manipulation; /* Improves touch response */
 }
 .srs-btn:hover {
   filter: brightness(0.98);
+}
+.srs-btn:active {
+  transform: scale(0.98);
 }
 .srs-btn--primary {
   background: #7c3aed;
@@ -86,4 +94,53 @@
   background: #fff;
   color: #111827;
   border: 1px solid #e5e7eb;
+}
+
+/* === NEW RESPONSIVE HUD STYLES === */
+.srs-hud-container {
+  position: fixed;
+  z-index: 2147483647;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Desktop Defaults */
+  right: 20px;
+  top: 20px;
+  width: 340px;
+  max-height: 85vh;
+  border-radius: 16px;
+}
+
+/* Mobile Overrides (Bottom Sheet) */
+@media (max-width: 640px) {
+  .srs-hud-container {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 60vh; /* Don't cover entire screen */
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  }
+}
+
+.srs-mobile-trigger {
+  position: fixed;
+  right: 16px;
+  bottom: 16px; /* Moved to bottom for easier reach */
+  padding: 12px 20px;
+  background: #7c3aed;
+  color: #fff;
+  border: 0;
+  border-radius: 50px;
+  cursor: pointer;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 9999;
+  font-size: 16px;
 }
