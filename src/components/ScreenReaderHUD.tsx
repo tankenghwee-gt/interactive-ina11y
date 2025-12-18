@@ -103,11 +103,11 @@ export function ScreenReaderHUD(): JSX.Element | null {
             <div style={helpGrid}>
               <KeyRow k="H" label="Headings" />
               <KeyRow k="B" label="Buttons" />
-              <KeyRow k="L" label="Links" />
+              {/* <KeyRow k="T" label="Tables" />
+              <KeyRow k="L" label="Links" /> */}
               <KeyRow k="F" label="Forms" />
-              <KeyRow k="T" label="Tables" />
               <KeyRow k="G" label="Graphics" />
-              <KeyRow k="D" label="Landmarks" />
+              {/* <KeyRow k="D" label="Landmarks" /> */}
               <KeyRow k="Space" label="Activate" />
               <KeyRow k="Esc" label="Exit Focus" />
             </div>

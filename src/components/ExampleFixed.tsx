@@ -105,7 +105,18 @@ export default function ExampleFixed(): JSX.Element {
             </div>
 
             {/* PSA */}
-            <aside className="psa" aria-label="Scam awareness notice">
+            <aside className="psa" aria-label="">
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: 18,
+                  fontWeight: 600,
+                  letterSpacing: "-0.01em",
+                  marginBottom: 16,
+                }}
+              >
+                Scam Advisory
+              </h2>
               <p>
                 Please be aware of scam websites that falsely claim to offer CDC
                 vouchers.
