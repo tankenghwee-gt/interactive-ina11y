@@ -10,6 +10,57 @@ import {
 import { ROLE_MAP } from "../utils/roleMap";
 
 // =========================================
+// 0. Configuration & Constants
+// =========================================
+
+type RotorOption = {
+  label: string;
+  predicate: ((n: AccNode) => boolean) | null;
+};
+
+const ROTOR_OPTIONS: RotorOption[] = [
+  { label: "Default", predicate: null },
+  { label: "Headings", predicate: (n) => n.role === "heading" },
+  { label: "Buttons", predicate: (n) => n.role === "button" },
+  { label: "Links", predicate: (n) => n.role === "link" },
+  {
+    label: "Form Fields",
+    predicate: (n) =>
+      [
+        "textbox",
+        "combobox",
+        "checkbox",
+        "radio button",
+        "switch",
+        "slider",
+        "spinbutton",
+      ].includes(n.role),
+  },
+  {
+    label: "Tables",
+    predicate: (n) => n.role === "table" || n.role === "grid",
+  },
+  {
+    label: "Graphics",
+    predicate: (n) => n.role === "img" || n.role === "image",
+  },
+  {
+    label: "Landmarks",
+    predicate: (n) =>
+      [
+        "banner",
+        "main",
+        "navigation",
+        "contentinfo",
+        "complementary",
+        "search",
+        "region",
+        "form",
+      ].includes(n.role),
+  },
+];
+
+// =========================================
 // 1. Pure Helpers (Formatting)
 // =========================================
 
@@ -218,7 +269,7 @@ function useLiveTree(enabled: boolean, onAlert: (text: string) => void) {
     });
 
     return () => observer.disconnect();
-  }, [enabled, onAlert]); // <--- onAlert must be stable to prevent loops!
+  }, [enabled, onAlert]);
 
   return { nodes, forceRefresh };
 }
@@ -242,6 +293,7 @@ export function useScreenReaderCore({
 }: CoreOptions = {}) {
   const [index, setIndex] = useState(-1);
   const [log, setLog] = useState<string[]>([]);
+  const [rotorIndex, setRotorIndex] = useState(0); // 0 = Default (Linear)
 
   // -- Composition --
   const { muted, setMuted, unlocked, setUnlocked, narrate } = useSpeech(lang);
@@ -254,7 +306,6 @@ export function useScreenReaderCore({
     [logCallback]
   );
 
-  // FIX: Stabilize the alert callback to prevent useLiveTree effect loops
   const handleAlert = useCallback(
     (alert: string) => {
       narrate(alert, handleLog);
@@ -385,7 +436,7 @@ export function useScreenReaderCore({
       const isPassword =
         el instanceof HTMLInputElement && el.type === "password";
 
-      let shouldAnnounceValue = false;
+      let shouldAnnounceValue = false; // Only announce full value on changes
 
       // 1. Navigation & Deletion Feedback
       if (isInput) {
@@ -456,12 +507,108 @@ export function useScreenReaderCore({
     [narrate, handleLog]
   );
 
+  // -- Mobile Gestures (Touch) --
+  // Simulates VoiceOver Rotor:
+  // - 2-Finger Tap: Cycle Rotor (Headings, Buttons, etc.)
+  // - Swipe Up/Down: Navigate by Rotor Type
+  // - Swipe Left/Right: Linear Navigation
+  useEffect(() => {
+    if (!enabled) return;
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let isTwoFinger = false;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        isTwoFinger = true;
+      } else {
+        isTwoFinger = false;
+      }
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      // 1. Two-Finger Tap Detection (Cycle Rotor)
+      // If we started with 2 fingers and ended with 0/1, treating as a "tap" interaction
+      if (isTwoFinger && e.touches.length === 0) {
+        // Simple heuristic: if it was a 2-finger start and now ends, cycle rotor.
+        // In a real app we'd check duration and movement, but this suffices for simulator.
+        setRotorIndex((prev) => {
+          const next = (prev + 1) % ROTOR_OPTIONS.length;
+          narrate(ROTOR_OPTIONS[next].label, handleLog);
+          return next;
+        });
+        e.preventDefault();
+        return;
+      }
+
+      if (e.changedTouches.length === 0) return;
+
+      const touchEndX = e.changedTouches[0].clientX;
+      const touchEndY = e.changedTouches[0].clientY;
+      const diffX = touchEndX - touchStartX;
+      const diffY = touchEndY - touchStartY;
+
+      const minSwipeDistance = 50;
+      const verticalThreshold = 50;
+
+      // 2. Horizontal Swipe (Linear Nav)
+      if (
+        Math.abs(diffX) > minSwipeDistance &&
+        Math.abs(diffY) < verticalThreshold
+      ) {
+        if (diffX > 0) {
+          // Swipe Right -> Next
+          focusAt(index + 1);
+        } else {
+          // Swipe Left -> Prev
+          focusAt(index - 1);
+        }
+        return;
+      }
+
+      // 3. Vertical Swipe (Rotor Nav)
+      if (
+        Math.abs(diffY) > minSwipeDistance &&
+        Math.abs(diffX) < verticalThreshold
+      ) {
+        // If Default (0), let browser scroll naturally
+        if (rotorIndex === 0) return;
+
+        // Otherwise, intercept for Rotor navigation
+        e.preventDefault();
+        const option = ROTOR_OPTIONS[rotorIndex];
+
+        if (option && option.predicate) {
+          if (diffY > 0) {
+            // Swipe Down -> Next [Type]
+            seek(true, option.label, option.predicate);
+          } else {
+            // Swipe Up -> Prev [Type]
+            seek(false, option.label, option.predicate);
+          }
+        }
+      }
+    };
+
+    document.addEventListener("touchstart", handleTouchStart, {
+      passive: false,
+    });
+    document.addEventListener("touchend", handleTouchEnd, { passive: false });
+
+    return () => {
+      document.removeEventListener("touchstart", handleTouchStart);
+      document.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [enabled, index, rotorIndex, focusAt, seek, narrate, handleLog]);
+
   // -- Keyboard Listener --
   useEffect(() => {
     if (!keyboard || !enabled) return;
 
     const onKey = (e: KeyboardEvent) => {
-      // 1. Unmute / Wake up
       if (
         !unlocked &&
         ["ArrowRight", "ArrowLeft", "h", "H", "Enter", " "].includes(e.key)
@@ -470,7 +617,6 @@ export function useScreenReaderCore({
         if (!muted) speak("Screen reader ready", { interrupt: true });
       }
 
-      // 2. Typing Mode
       const active = document.activeElement as HTMLElement;
       const isEditable =
         active &&
@@ -489,39 +635,63 @@ export function useScreenReaderCore({
         return;
       }
 
-      // 3. Navigation Shortcuts
       const forward = !e.shiftKey;
       const k = e.key.toLowerCase();
 
+      // Keyboard shortcuts map to Rotor Predicates
+      // This ensures keyboard 'h' behaves exactly like Rotor "Headings" -> Swipe Down
       const actions: Record<string, () => void> = {
         arrowright: () => focusAt(index + 1),
         arrowleft: () => focusAt(index - 1),
         " ": activateOrFocus,
         enter: activateOrFocus,
-        h: () => seek(forward, "heading", (n) => n.role === "heading"),
-        b: () => seek(forward, "button", (n) => n.role === "button"),
-        l: () => seek(forward, "link", (n) => n.role === "link"),
+        h: () =>
+          seek(
+            forward,
+            "heading",
+            ROTOR_OPTIONS.find((o) => o.label === "Headings")!.predicate!
+          ),
+        b: () =>
+          seek(
+            forward,
+            "button",
+            ROTOR_OPTIONS.find((o) => o.label === "Buttons")!.predicate!
+          ),
+        l: () =>
+          seek(
+            forward,
+            "link",
+            ROTOR_OPTIONS.find((o) => o.label === "Links")!.predicate!
+          ),
         t: () =>
           seek(
             forward,
             "table",
-            (n) => n.role === "table" || n.role === "grid"
+            ROTOR_OPTIONS.find((o) => o.label === "Tables")!.predicate!
           ),
         g: () =>
           seek(
             forward,
             "graphic",
-            (n) => n.role === "img" || n.role === "image"
+            ROTOR_OPTIONS.find((o) => o.label === "Graphics")!.predicate!
           ),
         f: () =>
-          seek(forward, "form field", (n) =>
-            ["textbox", "combobox", "checkbox", "radio button"].includes(n.role)
+          seek(
+            forward,
+            "form field",
+            ROTOR_OPTIONS.find((o) => o.label === "Form Fields")!.predicate!
           ),
+        d: () =>
+          seek(
+            forward,
+            "landmark",
+            ROTOR_OPTIONS.find((o) => o.label === "Landmarks")!.predicate!
+          ),
+        // 'i' doesn't have a direct Rotor equivalent in my simplified list, defining inline
         i: () => seek(forward, "list item", (n) => n.role === "listitem"),
-        d: () => seek(forward, "landmark", (n) => n.role.includes("landmark")),
       };
 
-      if (/[1-6]/.test(k)) {
+      if (/^[1-6]$/.test(k)) {
         const level = parseInt(k);
         e.preventDefault();
         seek(
