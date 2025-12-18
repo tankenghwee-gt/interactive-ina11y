@@ -7,639 +7,207 @@ import {
   computeStates,
   computeValue,
 } from "../utils/utils";
-import { ROLE_MAP } from "../utils/roleMap"; // <--- Import the map
+import { ROLE_MAP } from "../utils/roleMap";
 
-type CoreOptions = {
-  lang?: string;
-  onNarrate?: (line: string) => void;
-  keyboard?: boolean;
-  enabled?: boolean; // turn screen reader on/off
+// =========================================
+// 1. Pure Helpers (Formatting)
+// =========================================
+
+const formatAnnouncement = (node: AccNode): string => {
+  const parts: string[] = [];
+
+  // 1. State (Checkable)
+  if (["checkbox", "radio button", "switch"].includes(node.role)) {
+    const checkState = node.states.find((s) =>
+      /checked|unchecked|selected/.test(s)
+    );
+    if (checkState) parts.push(checkState);
+  }
+
+  // 2. Name
+  if (node.name) parts.push(`"${node.name}"`);
+
+  // 3. Role
+  if (node.role && node.role !== "statictext") {
+    if (node.role === "heading") {
+      const levelAttr = node.el.getAttribute("aria-level");
+      const level = levelAttr
+        ? parseInt(levelAttr, 10)
+        : parseInt(node.el.tagName.substring(1), 10);
+      parts.push(`Heading${!isNaN(level) ? ` level ${level}` : ""}`);
+    } else {
+      const mappedRole = ROLE_MAP[node.role] || node.role;
+      parts.push(mappedRole.charAt(0).toUpperCase() + mappedRole.slice(1));
+    }
+  }
+
+  // 4. Description
+  if (node.description) parts.push(node.description);
+
+  // 5. Value / Placeholder
+  if (node.role === "textbox" || node.role === "combobox") {
+    const el = node.el as HTMLInputElement | HTMLTextAreaElement;
+    // Password Safety: Don't read raw value here
+    if (el.type === "password") {
+      parts.push("Password field");
+    } else if (el.value?.trim()) {
+      parts.push(`Value: ${el.value.trim()}`);
+    } else if (el.placeholder) {
+      parts.push(el.placeholder);
+    }
+  }
+
+  // 6. Validation Error Messages (Validation Support)
+  if (node.states.includes("invalid")) {
+    const el = node.el as HTMLInputElement;
+    if (el.validationMessage) {
+      parts.push(`Error: ${el.validationMessage}`);
+    } else {
+      const errId = el.getAttribute("aria-errormessage");
+      if (errId) {
+        const errEl = document.getElementById(errId);
+        if (errEl?.textContent) {
+          parts.push(`Error: ${errEl.textContent.trim()}`);
+        }
+      }
+    }
+  }
+
+  // 7. Other States
+  const otherStates = node.states.filter(
+    (s) => !/checked|unchecked|selected|invalid/.test(s)
+  );
+  if (otherStates.length) parts.push(otherStates.join(", "));
+
+  // 8. Table Coords
+  if (node.coords) {
+    parts.push(`row ${node.coords.row}, col ${node.coords.col}`);
+  }
+
+  return parts.join(", ");
 };
 
-export function useScreenReaderCore({
-  lang,
-  onNarrate,
-  keyboard = true,
-  enabled = true,
-}: CoreOptions = {}) {
-  // ---- Core state
-  const [nodes, setNodes] = useState<AccNode[]>([]);
-  const [index, setIndex] = useState(0);
+// =========================================
+// 2. Sub-Hook: Speech Management
+// =========================================
+
+function useSpeech(lang?: string) {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [speechUnlocked, setSpeechUnlocked] = useState(true);
   const [muted, setMuted] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
+  const [unlocked, setUnlocked] = useState(true);
 
-  const typingDebounceRef = useRef<number | null>(null);
-  const lastEditableElRef = useRef<HTMLElement | null>(null);
-
-  // ---- Voices
   useEffect(() => {
     if (!("speechSynthesis" in window)) return;
-    const update = () => {
-      const v = window.speechSynthesis.getVoices();
-      if (v.length) setVoices(v);
-    };
+    const update = () => setVoices(window.speechSynthesis.getVoices());
     update();
     window.speechSynthesis.addEventListener("voiceschanged", update);
     return () =>
       window.speechSynthesis.removeEventListener("voiceschanged", update);
   }, []);
 
-  const preferredVoice = useMemo(() => {
+  const voice = useMemo(() => {
     if (!lang || !voices.length) return null;
-    const normalizedLang = lang.toLowerCase();
-    const voicePreferences = [
-      { name: "Google US English", lang: "en-US" },
-      {
-        name: "Microsoft Aria Online (Natural) - English (United States)",
-        lang: "en-US",
-      },
-      { name: "Samantha", lang: "en-US" }, // Apple voice
-      { name: "English United States", lang: "en-US" },
+    const target = lang.toLowerCase();
+
+    const candidates = [
+      (v: SpeechSynthesisVoice) => v.name === "Google US English",
+      (v: SpeechSynthesisVoice) => v.name.includes("Microsoft Aria"),
+      (v: SpeechSynthesisVoice) => v.name === "Samantha",
+      (v: SpeechSynthesisVoice) => v.lang.toLowerCase() === target,
+      (v: SpeechSynthesisVoice) =>
+        v.lang.toLowerCase().startsWith(target.split("-")[0]),
     ];
 
-    for (const pref of voicePreferences) {
-      const v = voices.find(
-        (x) =>
-          x.name === pref.name &&
-          x.lang?.toLowerCase() === pref.lang.toLowerCase()
-      );
-      if (v) return v;
+    for (const check of candidates) {
+      const found = voices.find(check);
+      if (found) return found;
     }
-
-    return (
-      voices.find((v) => v.lang?.toLowerCase() === normalizedLang) ||
-      voices.find((v) =>
-        v.lang?.toLowerCase().startsWith(normalizedLang.split("-")[0])
-      ) ||
-      null
-    );
+    return null;
   }, [voices, lang]);
 
-  // ---- Collect accessible nodes
-  useEffect(() => {
-    if (!enabled) {
-      // Cleanup when disabled
-      setNodes([]);
-      setLog([]);
-      setIndex(0);
-      document
-        .querySelectorAll(".srs-focus-ring")
-        .forEach((e) => e.classList.remove("srs-focus-ring"));
-      return;
-    }
-    setNodes(collectAccTree());
-  }, [enabled]);
-
-  // ---- Format announcement (VO-ish)
-  const formatAnnouncement = useCallback((node: AccNode): string => {
-    const parts: string[] = [];
-
-    // For checkable roles, surface state early (Checked Checkbox vs Checkbox)
-    if (["checkbox", "radio button", "switch"].includes(node.role)) {
-      const checkState = node.states.find((s) =>
-        /checked|unchecked|selected/.test(s)
-      );
-      if (checkState) parts.push(checkState);
-    }
-
-    // Name
-    if (node.name) parts.push(`"${node.name}"`);
-
-    // Role (Refactored to use ROLE_MAP)
-    if (node.role && node.role !== "statictext") {
-      // Special logic for Heading to include Levels
-      if (node.role === "heading") {
-        const levelAttr = node.el.getAttribute("aria-level");
-        let level: number | undefined;
-        if (levelAttr) {
-          const n = parseInt(levelAttr, 10);
-          if (Number.isFinite(n)) level = n;
-        } else {
-          const t = node.el.tagName.toLowerCase();
-          if (/^h[1-6]$/.test(t)) level = parseInt(t[1]!, 10);
-        }
-        parts.push(`Heading${level ? ` level ${level}` : ""}`);
+  const narrate = useCallback(
+    (text: string, onLog?: (t: string) => void) => {
+      onLog?.(text);
+      if (unlocked && !muted) {
+        speak(text, { voice: voice || undefined, interrupt: true });
       }
-      // General Mapping
-      else {
-        const mappedRole = ROLE_MAP[node.role] || node.role;
-        // Capitalize sentence case for speech
-        const roleLabel =
-          mappedRole.charAt(0).toUpperCase() + mappedRole.slice(1);
-        parts.push(roleLabel);
-      }
-    }
+    },
+    [unlocked, muted, voice]
+  );
 
-    // Description
-    if (node.description) {
-      parts.push(node.description);
-    }
+  return { muted, setMuted, unlocked, setUnlocked, narrate };
+}
 
-    // Text inputs: value or placeholder + "Edit text"
-    if (node.role === "textbox" || node.role === "combobox") {
-      const el = node.el as HTMLInputElement | HTMLTextAreaElement;
-      const val = el.value?.trim();
-      if (val) {
-        parts.push(`Value: ${val}`);
-      } else if (el.placeholder) {
-        parts.push(el.placeholder);
-      }
-    }
+// =========================================
+// 3. Sub-Hook: Tree & Live Regions
+// =========================================
 
-    // Other states (required/invalid/etc.)
-    const otherStates = node.states.filter(
-      (s) => !/checked|unchecked|selected/.test(s)
-    );
-    if (otherStates.length) parts.push(otherStates.join(", "));
+function useLiveTree(enabled: boolean, onAlert: (text: string) => void) {
+  const [nodes, setNodes] = useState<AccNode[]>([]);
 
-    // Table coords
-    if (node.coords)
-      parts.push(`row ${node.coords.row}, col ${node.coords.col}`);
-
-    return parts.join(", ");
+  const forceRefresh = useCallback(() => {
+    const fresh = collectAccTree();
+    setNodes(fresh);
+    return fresh;
   }, []);
 
-  // ---- Narrate (speak + log)
-  const narrate = useCallback(
-    (line: string) => {
-      if (!enabled) return;
-      setLog((prev) => [line, ...prev].slice(0, 50));
-      onNarrate?.(line);
-      if (speechUnlocked && !muted) {
-        speak(line, { voice: preferredVoice || undefined, interrupt: true });
-      }
-    },
-    [enabled, onNarrate, speechUnlocked, muted, preferredVoice]
-  );
-
-  const announceEditableValueSoon = useCallback(
-    (target: HTMLElement) => {
-      // Clear previous timer
-      if (typingDebounceRef.current) {
-        clearTimeout(typingDebounceRef.current);
-        typingDebounceRef.current = null;
-      }
-
-      // Debounce to wait for DOM value to settle (covers keydown->value update & IME)
-      typingDebounceRef.current = window.setTimeout(() => {
-        const el = target as
-          | HTMLInputElement
-          | HTMLTextAreaElement
-          | HTMLElement;
-        const isPassword =
-          el instanceof HTMLInputElement && el.type === "password";
-
-        if (isPassword) {
-          narrate("Password field, value hidden");
-          return;
-        }
-
-        const val =
-          (el as HTMLInputElement | HTMLTextAreaElement).value ??
-          el.textContent ??
-          "";
-
-        narrate(`Value: ${val?.toString().trim() || "blank"}`);
-      }, 1000);
-    },
-    [narrate]
-  );
-
-  // ---- Focus helpers
-  const focusAt = useCallback(
-    (i: number) => {
-      if (!enabled || !nodes.length) return;
-      const clamped = Math.max(0, Math.min(nodes.length - 1, i));
-      setIndex(clamped);
-      const node = nodes[clamped];
-      if (!node) return;
-
-      // 1. Clear old ring
+  useEffect(() => {
+    if (!enabled) {
+      setNodes([]);
       document
         .querySelectorAll(".srs-focus-ring")
         .forEach((e) => e.classList.remove("srs-focus-ring"));
-
-      // 2. Add new ring
-      node.el.classList.add("srs-focus-ring");
-      node.el.scrollIntoView({ block: "center", behavior: "smooth" });
-
-      console.log(node);
-
-      // Use LIVE states/value so required/invalid/checked reflect current reality
-      const live: AccNode = {
-        ...node,
-        states: computeStates(node.el, node.role),
-        value: computeValue(node.el, node.role),
-      };
-      narrate(formatAnnouncement(live));
-    },
-    [enabled, nodes, narrate, formatAnnouncement]
-  );
-
-  const seek = useCallback(
-    (
-      forward: boolean,
-      typeLabel: string,
-      predicate: (node: AccNode) => boolean
-    ) => {
-      if (!nodes.length) return;
-
-      // Determine start point and direction
-      const step = forward ? 1 : -1;
-      let i = index + step;
-
-      // Loop until we hit the bounds
-      while (i >= 0 && i < nodes.length) {
-        if (nodes[i] && predicate(nodes[i]!)) {
-          focusAt(i);
-          return;
-        }
-        i += step;
-      }
-
-      // If loop finishes without finding anything:
-      narrate(`No ${forward ? "next" : "previous"} ${typeLabel}`);
-    },
-    [nodes, index, focusAt, narrate]
-  );
-
-  const focusNext = useCallback(() => focusAt(index + 1), [focusAt, index]);
-  const focusPrev = useCallback(() => focusAt(index - 1), [focusAt, index]);
-
-  // ---- Activation (VO-like: only for activatable roles)
-  const activateOrFocus = useCallback(() => {
-    const activatableRoles = new Set([
-      "button",
-      "link",
-      "checkbox",
-      "radio button",
-      "switch",
-      "option",
-      "menuitem",
-      "tab",
-      "treeitem",
-    ]);
-
-    if (!enabled) return;
-    const node = nodes[index];
-    if (!node) return;
-
-    const el = node.el;
-    const editable =
-      el.isContentEditable ||
-      el.tagName === "TEXTAREA" ||
-      el.tagName === "SELECT" ||
-      (el instanceof HTMLInputElement &&
-        !["checkbox", "radio", "button", "submit"].includes(el.type)) ||
-      node.role === "textbox" ||
-      node.role === "combobox";
-
-    if (editable) {
-      el.focus?.();
-      narrate(`Edit field${node.name ? ` - ${node.name}` : ""}`);
       return;
     }
 
-    // 🚨 PATCH: Special case for submit buttons
-    if (el instanceof HTMLInputElement && el.type === "submit") {
-      el.form?.requestSubmit?.(el);
-      return;
-    }
-    if (el instanceof HTMLButtonElement && el.type === "submit") {
-      el.form?.requestSubmit?.(el);
-      return;
-    }
+    setNodes(collectAccTree());
 
-    if (activatableRoles.has(node.role)) {
-      el.click();
-
-      // Refresh + re-announce
-      queueMicrotask(() => {
-        const newNodes = collectAccTree();
-        setNodes(newNodes);
-        const cur = newNodes[index];
-        if (cur) {
-          const live: AccNode = {
-            ...cur,
-            states: computeStates(cur.el, cur.role),
-            value: computeValue(cur.el, cur.role),
-          };
-          narrate(formatAnnouncement(live));
-        }
-      });
-    }
-  }, [enabled, nodes, index, narrate, formatAnnouncement]);
-
-  // ---- Escape
-  const escapeAction = useCallback(() => {
-    if (!enabled) return;
-    const active = document.activeElement as HTMLElement | null;
-    const activeEditable =
-      !!active &&
-      (active.isContentEditable ||
-        active.tagName === "INPUT" ||
-        active.tagName === "TEXTAREA" ||
-        active.tagName === "SELECT");
-
-    window.speechSynthesis?.cancel();
-
-    // Clear all rings
-    document
-      .querySelectorAll(".srs-focus-ring")
-      .forEach((e) => e.classList.remove("srs-focus-ring"));
-
-    if (activeEditable) {
-      active?.blur();
-      // Restore ring to current SR node
-      nodes[index]?.el.classList.add("srs-focus-ring");
-    }
-  }, [enabled, nodes, index]);
-
-  // ---- Keyboard bindings
-  useEffect(() => {
-    if (!keyboard || !enabled) return;
-
-    const isEditable = (el: HTMLElement | null, role?: string) =>
-      !!el &&
-      (el.isContentEditable ||
-        el.tagName === "INPUT" ||
-        el.tagName === "TEXTAREA" ||
-        el.tagName === "SELECT" ||
-        (el instanceof HTMLInputElement &&
-          !["checkbox", "radio", "button", "submit"].includes(el.type)) ||
-        role === "textbox" ||
-        role === "combobox");
-
-    const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement as HTMLElement | null;
-      const activeIsEditable = isEditable(active);
-
-      // 1. Unmute logic
-      if (
-        !speechUnlocked &&
-        ["ArrowRight", "ArrowLeft", "h", "H", "Enter", " "].includes(e.key)
-      ) {
-        setSpeechUnlocked(true);
-        if (!muted)
-          speak("Screen reader ready", { voice: preferredVoice || undefined });
-      }
-
-      // 2. Escape logic
-      if (e.key === "Escape") {
-        e.preventDefault();
-        escapeAction();
-        return;
-      }
-
-      // 3. Typing Mode
-      if (activeIsEditable) {
-        const el = active as HTMLInputElement | HTMLTextAreaElement;
-
-        if (active) lastEditableElRef.current = active;
-
-        const printable =
-          e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
-
-        if (printable) {
-          narrate(e.key === " " ? "space" : e.key);
-          announceEditableValueSoon(active!);
-        } else {
-          switch (e.key) {
-            case "Backspace":
-              if (el.selectionStart) {
-                narrate(el.value[el.selectionStart - 1]);
-              }
-              break;
-            case "Delete":
-              if (el.selectionStart) {
-                narrate(el.value[el.selectionStart]);
-              }
-              break;
-            case "ArrowLeft":
-              if (el.selectionStart && el.selectionStart < el.value.length) {
-                narrate(el.value[el.selectionStart - 1]);
-              }
-              break;
-            case "ArrowRight":
-              if (el.selectionStart && el.selectionStart < el.value.length) {
-                narrate(el.value[el.selectionStart]);
-              }
-              break;
-          }
-        }
-        return;
-      }
-
-      // 4. SHORTCUTS
-      const forward = !e.shiftKey;
-
-      switch (e.key.toLowerCase()) {
-        case "arrowright":
-          e.preventDefault();
-          focusNext();
-          break;
-        case "arrowleft":
-          e.preventDefault();
-          focusPrev();
-          break;
-        case " ":
-        case "enter":
-          e.preventDefault();
-          activateOrFocus();
-          break;
-        case "h":
-          e.preventDefault();
-          seek(forward, "heading", (n) => n.role === "heading");
-          break;
-        case "1":
-        case "2":
-        case "3":
-        case "4":
-        case "5":
-        case "6": {
-          e.preventDefault();
-          const level = parseInt(e.key);
-          seek(forward, `heading level ${level}`, (n) => {
-            if (n.role !== "heading") return false;
-            // Simplified check against states string "level X"
-            return n.states.includes(`level ${level}`);
-          });
-          break;
-        }
-        case "b":
-          e.preventDefault();
-          seek(forward, "button", (n) => n.role === "button");
-          break;
-        case "l":
-          e.preventDefault();
-          seek(forward, "link", (n) => n.role === "link");
-          break;
-        case "t":
-          e.preventDefault();
-          seek(
-            forward,
-            "table",
-            (n) => n.role === "table" || n.role === "grid"
-          );
-          break;
-        case "g":
-          e.preventDefault();
-          seek(
-            forward,
-            "graphic",
-            (n) => n.role === "img" || n.role === "image"
-          );
-          break;
-        case "f":
-          e.preventDefault();
-          seek(
-            forward,
-            "form field",
-            (n) =>
-              [
-                "textbox",
-                "combobox",
-                "listbox",
-                "checkbox",
-                "radio button",
-                "switch",
-                "slider",
-                "spinbutton",
-              ].includes(n.role) ||
-              (n.el.tagName === "INPUT" && n.role !== "button")
-          );
-          break;
-        case "i":
-          e.preventDefault();
-          seek(
-            forward,
-            "list item",
-            (n) => n.role === "listitem" || n.role === "option"
-          );
-          break;
-        case "d":
-          e.preventDefault();
-          seek(forward, "landmark", (n) =>
-            [
-              "banner",
-              "main",
-              "navigation",
-              "contentinfo",
-              "complementary",
-              "search",
-              "region",
-            ].includes(n.role)
-          );
-          break;
-      }
-    };
-
-    window.addEventListener("keydown", onKey, { capture: true });
-    return () =>
-      window.removeEventListener("keydown", onKey, { capture: true });
-  }, [
-    keyboard,
-    enabled,
-    nodes,
-    index,
-    focusAt,
-    focusNext,
-    focusPrev,
-    activateOrFocus,
-    escapeAction,
-    narrate,
-    muted,
-    speechUnlocked,
-    preferredVoice,
-    announceEditableValueSoon,
-    seek,
-  ]);
-
-  // ---- Sync with native browser focus
-  useEffect(() => {
-    if (!enabled) return;
-
-    const onFocus = (e: FocusEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-
-      const i = nodes.findIndex((n) => n.el === target);
-      if (i >= 0) {
-        setIndex(i);
-        const live: AccNode = {
-          ...nodes[i]!,
-          states: computeStates(target, nodes[i]!.role),
-          value: computeValue(target, nodes[i]!.role),
-        };
-        // Update ring
-        document
-          .querySelectorAll(".srs-focus-ring")
-          .forEach((el) => el.classList.remove("srs-focus-ring"));
-        target.classList.add("srs-focus-ring");
-
-        const validationMessage = (target as HTMLInputElement)
-          .validationMessage;
-        if (validationMessage) {
-          narrate(validationMessage);
-          return;
-        }
-        narrate(formatAnnouncement(live));
-      }
-    };
-
-    window.addEventListener("focus", onFocus, true);
-    return () => window.removeEventListener("focus", onFocus, true);
-  }, [enabled, nodes, narrate, formatAnnouncement]);
-
-  // ---- Live Regions and Tree Updates
-  useEffect(() => {
-    if (!enabled) return;
-
-    let updateTimeout: number;
-
+    let timer: number;
     const observer = new MutationObserver((mutations) => {
-      let shouldRebuildTree = false;
+      let shouldRebuild = false;
 
       mutations.forEach((m) => {
-        let target = m.target as HTMLElement;
+        const target =
+          m.target.nodeType === Node.TEXT_NODE
+            ? m.target.parentElement
+            : (m.target as HTMLElement);
 
-        if (m.target.nodeType === Node.TEXT_NODE && m.target.parentElement) {
-          target = m.target.parentElement;
-        }
+        if (!target) return;
 
-        if (!(target instanceof Element)) return;
-
-        // 1. Live Region Updates
+        // Live Region Check
         const liveRegion = target.closest("[aria-live]");
         if (liveRegion && liveRegion instanceof HTMLElement) {
-          const liveType = liveRegion.getAttribute("aria-live");
-          if (liveType !== "off") {
+          if (liveRegion.getAttribute("aria-live") !== "off") {
             setTimeout(() => {
               const text = liveRegion.textContent?.trim();
               if (text && document.activeElement !== liveRegion) {
-                narrate(`Alert: ${text}`);
+                onAlert(`Alert: ${text}`);
               }
             }, 100);
           }
         }
 
-        // 2. Flag for tree rebuild
+        // Tree Rebuild Check
         if (
           m.type === "childList" ||
           (m.type === "attributes" &&
-            ["hidden", "style", "class"].includes(m.attributeName || ""))
+            [
+              "hidden",
+              "style",
+              "class",
+              "aria-hidden",
+              "aria-expanded",
+              "aria-checked",
+              "aria-invalid",
+            ].includes(m.attributeName || ""))
         ) {
-          shouldRebuildTree = true;
+          shouldRebuild = true;
         }
       });
 
-      if (shouldRebuildTree) {
-        clearTimeout(updateTimeout);
-        updateTimeout = window.setTimeout(() => {
-          setNodes(collectAccTree());
-        }, 500);
+      if (shouldRebuild) {
+        clearTimeout(timer);
+        timer = window.setTimeout(() => setNodes(collectAccTree()), 500);
       }
     });
 
@@ -651,7 +219,347 @@ export function useScreenReaderCore({
     });
 
     return () => observer.disconnect();
-  }, [enabled, narrate]);
+  }, [enabled, onAlert]);
+
+  return { nodes, forceRefresh };
+}
+
+// =========================================
+// 4. Main Orchestrator Hook
+// =========================================
+
+type CoreOptions = {
+  lang?: string;
+  onNarrate?: (line: string) => void;
+  keyboard?: boolean;
+  enabled?: boolean;
+};
+
+export function useScreenReaderCore({
+  lang,
+  onNarrate: logCallback,
+  keyboard = true,
+  enabled = true,
+}: CoreOptions = {}) {
+  const [index, setIndex] = useState(0);
+  const [log, setLog] = useState<string[]>([]);
+
+  // -- Composition --
+  const { muted, setMuted, unlocked, setUnlocked, narrate } = useSpeech(lang);
+
+  const handleLog = useCallback(
+    (text: string) => {
+      setLog((prev) => [text, ...prev].slice(0, 50));
+      logCallback?.(text);
+    },
+    [logCallback]
+  );
+
+  const { nodes, forceRefresh } = useLiveTree(enabled, (alert) =>
+    narrate(alert, handleLog)
+  );
+
+  // -- Focus Logic --
+  const focusAt = useCallback(
+    (i: number) => {
+      if (!enabled || !nodes.length) return;
+      const clamped = Math.max(0, Math.min(nodes.length - 1, i));
+      setIndex(clamped);
+      const node = nodes[clamped];
+      if (!node) return;
+
+      document
+        .querySelectorAll(".srs-focus-ring")
+        .forEach((e) => e.classList.remove("srs-focus-ring"));
+      node.el.classList.add("srs-focus-ring");
+      node.el.scrollIntoView({ block: "center", behavior: "smooth" });
+
+      const liveNode: AccNode = {
+        ...node,
+        states: computeStates(node.el, node.role),
+        value: computeValue(node.el, node.role),
+      };
+
+      narrate(formatAnnouncement(liveNode), handleLog);
+    },
+    [enabled, nodes, narrate, handleLog]
+  );
+
+  const seek = useCallback(
+    (forward: boolean, label: string, predicate: (n: AccNode) => boolean) => {
+      if (!nodes.length) return;
+      const step = forward ? 1 : -1;
+      let i = index + step;
+      while (i >= 0 && i < nodes.length) {
+        if (nodes[i] && predicate(nodes[i]!)) {
+          focusAt(i);
+          return;
+        }
+        i += step;
+      }
+      narrate(`No ${forward ? "next" : "previous"} ${label}`, handleLog);
+    },
+    [nodes, index, focusAt, narrate, handleLog]
+  );
+
+  // -- Action Logic --
+  const activateOrFocus = useCallback(() => {
+    if (!enabled || !nodes[index]) return;
+    const { el, role, name } = nodes[index];
+
+    const isInput =
+      el.tagName === "INPUT" ||
+      el.tagName === "TEXTAREA" ||
+      el.tagName === "SELECT";
+    const isEditRole = role === "textbox" || role === "combobox";
+
+    if (
+      el.isContentEditable ||
+      (isInput &&
+        !["checkbox", "radio", "button", "submit"].includes(
+          (el as HTMLInputElement).type
+        )) ||
+      isEditRole
+    ) {
+      el.focus();
+      narrate(`Edit field${name ? ` - ${name}` : ""}`, handleLog);
+      return;
+    }
+
+    if (el instanceof HTMLInputElement && el.type === "submit") {
+      el.form?.requestSubmit?.(el);
+    } else {
+      el.click();
+    }
+
+    queueMicrotask(() => {
+      const freshNodes = forceRefresh();
+      const newNodeIndex = freshNodes.findIndex((n) => n.el === el);
+      const targetNode =
+        newNodeIndex >= 0 ? freshNodes[newNodeIndex] : freshNodes[index];
+
+      if (targetNode) {
+        if (newNodeIndex >= 0) setIndex(newNodeIndex);
+        const liveNode: AccNode = {
+          ...targetNode,
+          states: computeStates(targetNode.el, targetNode.role),
+          value: computeValue(targetNode.el, targetNode.role),
+        };
+        narrate(formatAnnouncement(liveNode), handleLog);
+        document
+          .querySelectorAll(".srs-focus-ring")
+          .forEach((e) => e.classList.remove("srs-focus-ring"));
+        targetNode.el.classList.add("srs-focus-ring");
+      }
+    });
+  }, [enabled, nodes, index, narrate, handleLog, forceRefresh]);
+
+  const escapeAction = useCallback(() => {
+    if (!enabled) return;
+    const active = document.activeElement as HTMLElement;
+    window.speechSynthesis?.cancel();
+
+    if (active && (active.tagName === "INPUT" || active.isContentEditable)) {
+      active.blur();
+      nodes[index]?.el.classList.add("srs-focus-ring");
+    } else {
+      document
+        .querySelectorAll(".srs-focus-ring")
+        .forEach((e) => e.classList.remove("srs-focus-ring"));
+    }
+  }, [enabled, nodes, index]);
+
+  // -- Input Typing Echo --
+  // -- Input Typing Echo --
+  const typingDebounce = useRef<number | null>(null);
+
+  const handleTyping = useCallback(
+    (e: KeyboardEvent, el: HTMLElement) => {
+      // Determine input type
+      const isInput =
+        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      const isPassword =
+        el instanceof HTMLInputElement && el.type === "password";
+
+      let shouldAnnounceValue = false; // Only announce full value on changes
+
+      // 1. Navigation & Deletion Feedback
+      if (isInput) {
+        const input = el as HTMLInputElement | HTMLTextAreaElement;
+        const idx = input.selectionStart ?? 0;
+        const val = input.value;
+
+        // Keys that look BEHIND (Backspace / Left)
+        if (e.key === "Backspace") {
+          if (idx > 0) {
+            const char = val[idx - 1];
+            narrate(isPassword ? "star" : char, handleLog);
+          }
+          shouldAnnounceValue = true; // Content changed
+        } else if (e.key === "ArrowLeft") {
+          if (idx > 0) {
+            const char = val[idx - 1];
+            narrate(isPassword ? "star" : char, handleLog);
+          }
+          // Navigation only - do not announce full value
+        }
+
+        // Keys that look AHEAD (Delete / Right)
+        else if (e.key === "Delete") {
+          if (idx < val.length) {
+            const char = val[idx];
+            narrate(isPassword ? "star" : char, handleLog);
+          }
+          shouldAnnounceValue = true; // Content changed
+        } else if (e.key === "ArrowRight") {
+          if (idx < val.length) {
+            const char = val[idx];
+            narrate(isPassword ? "star" : char, handleLog);
+          }
+          // Navigation only - do not announce full value
+        }
+      }
+
+      // 2. Typing Echo (Alphanumeric)
+      const isPrintable =
+        e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+
+      if (isPrintable) {
+        narrate(
+          isPassword ? "star" : e.key === " " ? "space" : e.key,
+          handleLog
+        );
+        shouldAnnounceValue = true;
+      }
+
+      // 3. Debounced Value Announcement
+      // Only runs if the action changed the value (Typing/Deletion)
+      if (shouldAnnounceValue) {
+        if (typingDebounce.current) clearTimeout(typingDebounce.current);
+        typingDebounce.current = window.setTimeout(() => {
+          if (isPassword) {
+            narrate("Password field, value hidden", handleLog);
+          } else {
+            const val = (el as HTMLInputElement).value || el.textContent || "";
+            narrate(`Value: ${val}`, handleLog);
+          }
+        }, 1000);
+      }
+    },
+    [narrate, handleLog]
+  );
+  // -- Keyboard Listener --
+  useEffect(() => {
+    if (!keyboard || !enabled) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      // 1. Unmute / Wake up
+      if (
+        !unlocked &&
+        ["ArrowRight", "ArrowLeft", "h", "H", "Enter", " "].includes(e.key)
+      ) {
+        setUnlocked(true);
+        if (!muted) speak("Screen reader ready", { interrupt: true });
+      }
+
+      // 2. Typing Mode
+      const active = document.activeElement as HTMLElement;
+      const isEditable =
+        active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.isContentEditable);
+
+      if (isEditable && e.key !== "Escape") {
+        handleTyping(e, active);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        escapeAction();
+        return;
+      }
+
+      // 3. Navigation Shortcuts
+      const forward = !e.shiftKey;
+      const k = e.key.toLowerCase();
+
+      const actions: Record<string, () => void> = {
+        arrowright: () => focusAt(index + 1),
+        arrowleft: () => focusAt(index - 1),
+        " ": activateOrFocus,
+        enter: activateOrFocus,
+        h: () => seek(forward, "heading", (n) => n.role === "heading"),
+        b: () => seek(forward, "button", (n) => n.role === "button"),
+        l: () => seek(forward, "link", (n) => n.role === "link"),
+        t: () =>
+          seek(
+            forward,
+            "table",
+            (n) => n.role === "table" || n.role === "grid"
+          ),
+        g: () =>
+          seek(
+            forward,
+            "graphic",
+            (n) => n.role === "img" || n.role === "image"
+          ),
+        f: () =>
+          seek(forward, "form field", (n) =>
+            ["textbox", "combobox", "checkbox", "radio button"].includes(n.role)
+          ),
+        i: () => seek(forward, "list item", (n) => n.role === "listitem"),
+        d: () => seek(forward, "landmark", (n) => n.role.includes("landmark")),
+      };
+
+      if (/[1-6]/.test(k)) {
+        const level = parseInt(k);
+        e.preventDefault();
+        seek(
+          forward,
+          `heading level ${level}`,
+          (n) => n.role === "heading" && n.states.includes(`level ${level}`)
+        );
+        return;
+      }
+
+      if (actions[k]) {
+        e.preventDefault();
+        actions[k]();
+      }
+    };
+
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKey, { capture: true });
+  }, [
+    keyboard,
+    enabled,
+    index,
+    nodes,
+    unlocked,
+    muted,
+    focusAt,
+    seek,
+    activateOrFocus,
+    escapeAction,
+    handleTyping,
+  ]);
+
+  // -- Native Focus Sync --
+  useEffect(() => {
+    if (!enabled) return;
+    const onFocus = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      const i = nodes.findIndex((n) => n.el === target);
+      if (i >= 0 && i !== index) {
+        focusAt(i);
+      }
+    };
+    window.addEventListener("focus", onFocus, true);
+    return () => window.removeEventListener("focus", onFocus, true);
+  }, [enabled, nodes, index, focusAt]);
 
   return {
     state: {
@@ -660,18 +568,11 @@ export function useScreenReaderCore({
       muted,
       log,
       current: nodes[index] || null,
-      currentAnnouncement: nodes[index]
-        ? formatAnnouncement({
-            ...nodes[index]!,
-            states: computeStates(nodes[index]!.el, nodes[index]!.role),
-            value: computeValue(nodes[index]!.el, nodes[index]!.role),
-          })
-        : "",
     },
     actions: {
+      focusNext: () => focusAt(index + 1),
+      focusPrev: () => focusAt(index - 1),
       focusAt,
-      focusNext,
-      focusPrev,
       activateOrFocus,
       escapeAction,
       setMuted,
