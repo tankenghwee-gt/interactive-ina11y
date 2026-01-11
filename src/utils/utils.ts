@@ -395,17 +395,6 @@ const collectNodesRecursively = (root: Node, nodes: AccNode[]): void => {
       const hierarchy = computeHierarchy(el, role);
       const coords = computeTableCoords(el);
 
-      console.log({
-        el,
-        role,
-        name,
-        description,
-        states,
-        value,
-        pos: hierarchy,
-        coords,
-      });
-
       if (
         name ||
         value ||

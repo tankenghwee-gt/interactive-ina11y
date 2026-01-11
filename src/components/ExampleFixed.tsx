@@ -94,7 +94,9 @@ export default function ExampleFixed(): JSX.Element {
 
             <img
               src="https://dam.mediacorp.sg/image/upload/s--2MP54hl5--/f_auto,q_auto/v1/mediacorp/cna/image/2025/02/14/scam_spf.png?itok=xTWaFySW"
-              alt="Fake vs real CDC voucher websites."
+              alt="Fake vs real CDC voucher websites. 
+                    The fake page claims residents can get $2000 assistance and asks for full name and Telegram number.
+                    The real RedeemSG page shows available vouchers without asking for personal details."
               style={{
                 width: "100%",
                 borderRadius: 8,

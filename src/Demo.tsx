@@ -1,8 +1,8 @@
-import { type JSX } from "react";
-import { ScreenReaderHUD } from "./components/ScreenReaderHUD";
+import type { JSX } from "react";
 import Example from "./components/Example";
 import ExampleFixed from "./components/ExampleFixed";
 import ExampleTimed from "./components/ExampleTimed";
+import { ScreenReaderHUD } from "./components/ScreenReaderHUD";
 
 // =============================
 // Demo (optional)

@@ -1,20 +1,20 @@
 // src/components/ScreenReaderHUD.tsx
-import React, { useState, useEffect, useRef, type JSX } from "react";
-import { useScreenReaderCore } from "../hooks/useScreenReaderSimulator";
+
+import { type JSX, useState, useRef, useEffect, useCallback } from "react";
+import { HiEye, HiQuestionMarkCircle } from "react-icons/hi";
 import {
-  HiSpeakerWave,
-  HiSpeakerXMark,
-  HiEye,
   HiEyeSlash,
-  HiQuestionMarkCircle,
   HiXMark,
+  HiSpeakerXMark,
+  HiSpeakerWave,
 } from "react-icons/hi2";
+import { useScreenReaderCore } from "../hooks/useScreenReaderSimulator";
 import { speak } from "../utils/utils";
 
 export function ScreenReaderHUD(): JSX.Element | null {
   const [hudOpen, setHudOpen] = useState(true);
   const [showHelp, setShowHelp] = useState(false); // Default closed on mobile
-  const [curtainActive, setCurtainActive] = useState(false);
+  const [curtainActive, setCurtainActive] = useState(true);
 
   // Ref for the fixed container
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,6 +23,27 @@ export function ScreenReaderHUD(): JSX.Element | null {
     state: { muted, log },
     actions: { focusPrev, focusNext, activateOrFocus, escapeAction, setMuted },
   } = useScreenReaderCore({ lang: "en-US", enabled: hudOpen });
+  const [width, setWidth] = useState<number>(window.innerWidth);
+
+  const handleWindowSizeChange = useCallback(() => {
+    setWidth(window.innerWidth);
+  }, []);
+  useEffect(() => {
+    window.addEventListener("resize", handleWindowSizeChange);
+    return () => {
+      window.removeEventListener("resize", handleWindowSizeChange);
+    };
+  }, [handleWindowSizeChange]);
+
+  const isMobile = width <= 768;
+
+  if (curtainActive) {
+    document.body.style.overflow = "hidden";
+    document.body.style.height = "100%";
+    document.body.style.margin = "0";
+  } else {
+    document.body.style.overflow = "auto";
+  }
 
   // === BEST PRACTICE: Dynamic Body Padding ===
   // This ensures the page content is never hidden behind the fixed HUD.
@@ -51,7 +72,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
       observer.disconnect();
       document.body.style.paddingBottom = ""; // Cleanup on unmount
     };
-  }, [hudOpen, showHelp, log]); // Re-run if visibility or content changes
+  }, [hudOpen]); // Re-run if visibility or content changes
 
   if (!hudOpen) {
     return (
@@ -77,6 +98,10 @@ export function ScreenReaderHUD(): JSX.Element | null {
             <p style={{ margin: 0, opacity: 0.8 }}>
               Visual output is hidden to simulate screen reader usage without
               sight.
+            </p>
+            <br></br>
+            <p style={{ margin: 0, opacity: 0.8 }}>
+              Swipe here if you are using touch input.
             </p>
           </div>
         </div>
@@ -149,17 +174,25 @@ export function ScreenReaderHUD(): JSX.Element | null {
         >
           <ControlButton
             label="Previous"
-            sub="Swipe Left"
+            sub={isMobile ? "Swipe Left" : "Left Arrow"}
             onClick={focusPrev}
           />
-          <ControlButton label="Next" sub="Swipe Right" onClick={focusNext} />
+          <ControlButton
+            label="Next"
+            sub={isMobile ? "Swipe Right" : "Right Arrow"}
+            onClick={focusNext}
+          />
           <ControlButton
             label="Select"
-            sub="Double Tap"
+            sub={isMobile ? "Double Tap" : "Enter/Space"}
             onClick={activateOrFocus}
             highlight
           />
-          <ControlButton label="Stop" sub="Esc" onClick={escapeAction} />
+          <ControlButton
+            label="Stop"
+            sub={isMobile ? "Three Finger Tap" : "Esc"}
+            onClick={escapeAction}
+          />
         </div>
 
         {/* Narration Toggle */}
@@ -268,12 +301,13 @@ const curtainStyle: React.CSSProperties = {
   color: "#f3f4f6",
   zIndex: 2147483646,
   display: "flex",
-  alignItems: "center",
   justifyContent: "center",
   pointerEvents: "auto",
 };
 
 const curtainContentStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "25%",
   textAlign: "center",
   maxWidth: 400,
   padding: 20,

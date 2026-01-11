@@ -116,7 +116,7 @@
 }
 
 /* Mobile Overrides (Bottom Sheet) */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .srs-hud-container {
     top: auto;
     bottom: 0;

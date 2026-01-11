@@ -4,31 +4,22 @@ export default function Example(): JSX.Element {
   return (
     <>
       <div
-        // UPDATED: Converted inline styles to Tailwind
-        // sm:px-0 adds padding only on larger screens; mobile is full width
-        className="relative pt-10 pb-48 w-full sm:max-w-[400px] mx-auto text-gray-900 font-sans"
+        // FIXED: Removed 'lg:' prefix from max-w.
+        // Now it never exceeds 420px, preventing stretching on wide screens.
+        className="relative pt-10 pb-48 w-full max-w-[420px] mx-auto text-gray-900 font-sans"
       >
         <h1 className="text-xl font-bold tracking-tight mb-4 px-4 sm:px-0">
           Fill in your information to redeem your CDC vouchers
         </h1>
 
         <div className="flex flex-col gap-4 w-full">
-          <form
-            onSubmit={(event) => {
-              event?.preventDefault();
-              alert("You did it! Good job!");
-            }}
-          >
-            {/* UPDATED CONTAINER: 
-                - Mobile: No border, no radius, full width 
-                - Desktop (sm): Border, rounded corners, shadow 
-            */}
+          <form>
+            {/* FIXED: Removed 'lg:' prefix. Border/Radius now applies only if there's room (sm+), 
+                but width is always constrained by parent. */}
             <section className="bg-white p-4 sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-lg">
               <div style={{ display: "grid", gap: 12 }}>
                 <div>
-                  <label style={{ marginBottom: 6, fontWeight: 600 }}>
-                    Name
-                  </label>
+                  <div style={{ marginBottom: 6, fontWeight: 600 }}>Name</div>
                   <input id="name" style={inputStyle} />
                 </div>
 
@@ -56,6 +47,7 @@ export default function Example(): JSX.Element {
                     CDC vouchers.
                   </p>
                 </div>
+                {/* Image will now fit within the 420px container */}
                 <img
                   src="https://dam.mediacorp.sg/image/upload/s--2MP54hl5--/f_auto,q_auto/v1/mediacorp/cna/image/2025/02/14/scam_spf.png?itok=xTWaFySW"
                   style={{
@@ -80,9 +72,10 @@ export default function Example(): JSX.Element {
                   Try activating the button below.
                 </p>
                 <div
-                  onClick={() =>
-                    alert("Congratulations! Did you click the button?")
-                  }
+                  onClick={(event) => {
+                    event?.preventDefault();
+                    alert("You did it! Good job!");
+                  }}
                   style={ghostBtn}
                   className={"srs-btn--muted"}
                 >
@@ -120,7 +113,6 @@ export default function Example(): JSX.Element {
   );
 }
 
-// Keep inline style helpers for inputs/buttons as they are specific to the "bad" example
 const inputStyle: React.CSSProperties = {
   width: "100%",
   height: 44,

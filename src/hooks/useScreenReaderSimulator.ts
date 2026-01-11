@@ -204,9 +204,9 @@ function useLiveTree(enabled: boolean, onAlert: (text: string) => void) {
   useEffect(() => {
     if (!enabled) {
       setNodes([]);
-      document
-        .querySelectorAll(".srs-focus-ring")
-        .forEach((e) => e.classList.remove("srs-focus-ring"));
+      document.querySelectorAll(".srs-focus-ring").forEach((e) => {
+        e.classList.remove("srs-focus-ring");
+      });
       return;
     }
 
@@ -293,7 +293,7 @@ export function useScreenReaderCore({
 }: CoreOptions = {}) {
   const [index, setIndex] = useState(-1);
   const [log, setLog] = useState<string[]>([]);
-  const [rotorIndex, setRotorIndex] = useState(0); // 0 = Default (Linear)
+  // const [rotorIndex, setRotorIndex] = useState(0); // 0 = Default (Linear)
 
   // -- Composition --
   const { muted, setMuted, unlocked, setUnlocked, narrate } = useSpeech(lang);
@@ -320,13 +320,14 @@ export function useScreenReaderCore({
     (i: number) => {
       if (!enabled || !nodes.length) return;
       const clamped = Math.max(0, Math.min(nodes.length - 1, i));
+
       setIndex(clamped);
       const node = nodes[clamped];
       if (!node) return;
 
-      document
-        .querySelectorAll(".srs-focus-ring")
-        .forEach((e) => e.classList.remove("srs-focus-ring"));
+      document.querySelectorAll(".srs-focus-ring").forEach((e) => {
+        e.classList.remove("srs-focus-ring");
+      });
       node.el.classList.add("srs-focus-ring");
       node.el.scrollIntoView({ block: "center", behavior: "smooth" });
 
@@ -335,6 +336,18 @@ export function useScreenReaderCore({
         states: computeStates(node.el, node.role),
         value: computeValue(node.el, node.role),
       };
+
+      if (i === -1) {
+        narrate(
+          `(No previous element) ${formatAnnouncement(liveNode)}`,
+          handleLog
+        );
+        return;
+      }
+      if (i === nodes.length) {
+        narrate(`(No next element) ${formatAnnouncement(liveNode)}`, handleLog);
+        return;
+      }
 
       narrate(formatAnnouncement(liveNode), handleLog);
     },
@@ -360,6 +373,17 @@ export function useScreenReaderCore({
 
   // -- Action Logic --
   const activateOrFocus = useCallback(() => {
+    const activatableRoles = new Set([
+      "button",
+      "link",
+      "checkbox",
+      "radio button",
+      "switch",
+      "option",
+      "menuitem",
+      "tab",
+      "treeitem",
+    ]);
     if (!enabled || !nodes[index]) return;
     const { el, role, name } = nodes[index];
 
@@ -384,30 +408,32 @@ export function useScreenReaderCore({
 
     if (el instanceof HTMLInputElement && el.type === "submit") {
       el.form?.requestSubmit?.(el);
-    } else {
-      el.click();
     }
 
-    queueMicrotask(() => {
-      const freshNodes = forceRefresh();
-      const newNodeIndex = freshNodes.findIndex((n) => n.el === el);
-      const targetNode =
-        newNodeIndex >= 0 ? freshNodes[newNodeIndex] : freshNodes[index];
+    if (activatableRoles.has(role)) {
+      el.click();
 
-      if (targetNode) {
-        if (newNodeIndex >= 0) setIndex(newNodeIndex);
-        const liveNode: AccNode = {
-          ...targetNode,
-          states: computeStates(targetNode.el, targetNode.role),
-          value: computeValue(targetNode.el, targetNode.role),
-        };
-        narrate(formatAnnouncement(liveNode), handleLog);
-        document
-          .querySelectorAll(".srs-focus-ring")
-          .forEach((e) => e.classList.remove("srs-focus-ring"));
-        targetNode.el.classList.add("srs-focus-ring");
-      }
-    });
+      queueMicrotask(() => {
+        const freshNodes = forceRefresh();
+        const newNodeIndex = freshNodes.findIndex((n) => n.el === el);
+        const targetNode =
+          newNodeIndex >= 0 ? freshNodes[newNodeIndex] : freshNodes[index];
+
+        if (targetNode) {
+          if (newNodeIndex >= 0) setIndex(newNodeIndex);
+          const liveNode: AccNode = {
+            ...targetNode,
+            states: computeStates(targetNode.el, targetNode.role),
+            value: computeValue(targetNode.el, targetNode.role),
+          };
+          narrate(formatAnnouncement(liveNode), handleLog);
+          document.querySelectorAll(".srs-focus-ring").forEach((e) => {
+            e.classList.remove("srs-focus-ring");
+          });
+          targetNode.el.classList.add("srs-focus-ring");
+        }
+      });
+    }
   }, [enabled, nodes, index, narrate, handleLog, forceRefresh]);
 
   const escapeAction = useCallback(() => {
@@ -419,9 +445,9 @@ export function useScreenReaderCore({
       active.blur();
       nodes[index]?.el.classList.add("srs-focus-ring");
     } else {
-      document
-        .querySelectorAll(".srs-focus-ring")
-        .forEach((e) => e.classList.remove("srs-focus-ring"));
+      document.querySelectorAll(".srs-focus-ring").forEach((e) => {
+        e.classList.remove("srs-focus-ring");
+      });
     }
   }, [enabled, nodes, index]);
 
@@ -518,6 +544,9 @@ export function useScreenReaderCore({
     let touchStartX = 0;
     let touchStartY = 0;
     let isTwoFinger = false;
+    let isThreeFinger = false;
+    let timeout: number;
+    let lastTap = 0;
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
@@ -525,21 +554,45 @@ export function useScreenReaderCore({
       } else {
         isTwoFinger = false;
       }
+      if (e.touches.length === 3) {
+        isThreeFinger = true;
+      } else {
+        isThreeFinger = false;
+      }
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
+      const curTime = Date.now();
+      const tapLen = curTime - lastTap;
+      // 0. Double Tap Detection (Activate element)
+      if (!isTwoFinger && tapLen < 500 && tapLen > 0) {
+        console.log("Double tapped!");
+        e.preventDefault();
+        activateOrFocus();
+        return;
+      } else {
+        timeout = setTimeout(() => {
+          clearTimeout(timeout);
+        }, 500);
+      }
+
       // 1. Two-Finger Tap Detection (Cycle Rotor)
       // If we started with 2 fingers and ended with 0/1, treating as a "tap" interaction
-      if (isTwoFinger && e.touches.length === 0) {
-        // Simple heuristic: if it was a 2-finger start and now ends, cycle rotor.
-        // In a real app we'd check duration and movement, but this suffices for simulator.
-        setRotorIndex((prev) => {
-          const next = (prev + 1) % ROTOR_OPTIONS.length;
-          narrate(ROTOR_OPTIONS[next].label, handleLog);
-          return next;
-        });
+      // if (isTwoFinger && e.touches.length === 0) {
+      //   // Simple heuristic: if it was a 2-finger start and now ends, cycle rotor.
+      //   // In a real app we'd check duration and movement, but this suffices for simulator.
+      //   setRotorIndex((prev) => {
+      //     const next = (prev + 1) % ROTOR_OPTIONS.length;
+      //     narrate(ROTOR_OPTIONS[next].label, handleLog);
+      //     return next;
+      //   });
+      //   e.preventDefault();
+      //   return;
+      // }
+      if (isThreeFinger) {
+        window.speechSynthesis.cancel();
         e.preventDefault();
         return;
       }
@@ -570,27 +623,29 @@ export function useScreenReaderCore({
       }
 
       // 3. Vertical Swipe (Rotor Nav)
-      if (
-        Math.abs(diffY) > minSwipeDistance &&
-        Math.abs(diffX) < verticalThreshold
-      ) {
-        // If Default (0), let browser scroll naturally
-        if (rotorIndex === 0) return;
+      // if (
+      //   Math.abs(diffY) > minSwipeDistance &&
+      //   Math.abs(diffX) < verticalThreshold
+      // ) {
+      //   // If Default (0), let browser scroll naturally
+      //   if (rotorIndex === 0) return;
 
-        // Otherwise, intercept for Rotor navigation
-        e.preventDefault();
-        const option = ROTOR_OPTIONS[rotorIndex];
+      //   // Otherwise, intercept for Rotor navigation
+      //   e.preventDefault();
+      //   const option = ROTOR_OPTIONS[rotorIndex];
+      //   console.log(diffY);
+      //   if (option && option.predicate) {
+      //     if (diffY > 0) {
+      //       // Swipe Down -> Next [Type]
+      //       seek(true, option.label, option.predicate);
+      //     } else {
+      //       // Swipe Up -> Prev [Type]
+      //       seek(false, option.label, option.predicate);
+      //     }
+      //   }
+      // }
 
-        if (option && option.predicate) {
-          if (diffY > 0) {
-            // Swipe Down -> Next [Type]
-            seek(true, option.label, option.predicate);
-          } else {
-            // Swipe Up -> Prev [Type]
-            seek(false, option.label, option.predicate);
-          }
-        }
-      }
+      lastTap = curTime;
     };
 
     document.addEventListener("touchstart", handleTouchStart, {
@@ -602,13 +657,18 @@ export function useScreenReaderCore({
       document.removeEventListener("touchstart", handleTouchStart);
       document.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [enabled, index, rotorIndex, focusAt, seek, narrate, handleLog]);
+  }, [enabled, index, focusAt, seek, narrate, handleLog]);
 
   // -- Keyboard Listener --
   useEffect(() => {
     if (!keyboard || !enabled) return;
 
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Control") {
+        window.speechSynthesis.cancel();
+        return;
+      }
+
       if (
         !unlocked &&
         ["ArrowRight", "ArrowLeft", "h", "H", "Enter", " "].includes(e.key)
@@ -715,7 +775,6 @@ export function useScreenReaderCore({
     keyboard,
     enabled,
     index,
-    nodes,
     unlocked,
     muted,
     focusAt,
