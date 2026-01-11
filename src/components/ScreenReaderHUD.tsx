@@ -14,7 +14,7 @@ import { speak } from "../utils/utils";
 export function ScreenReaderHUD(): JSX.Element | null {
   const [hudOpen, setHudOpen] = useState(true);
   const [showHelp, setShowHelp] = useState(false); // Default closed on mobile
-  const [curtainActive, setCurtainActive] = useState(false);
+  const [curtainActive, setCurtainActive] = useState(true);
 
   // Ref for the fixed container
   const containerRef = useRef<HTMLDivElement>(null);

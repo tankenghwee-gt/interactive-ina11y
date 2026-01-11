@@ -360,6 +360,17 @@ export function useScreenReaderCore({
 
   // -- Action Logic --
   const activateOrFocus = useCallback(() => {
+    const activatableRoles = new Set([
+      "button",
+      "link",
+      "checkbox",
+      "radio button",
+      "switch",
+      "option",
+      "menuitem",
+      "tab",
+      "treeitem",
+    ]);
     if (!enabled || !nodes[index]) return;
     const { el, role, name } = nodes[index];
 
@@ -384,30 +395,32 @@ export function useScreenReaderCore({
 
     if (el instanceof HTMLInputElement && el.type === "submit") {
       el.form?.requestSubmit?.(el);
-    } else {
-      el.click();
     }
 
-    queueMicrotask(() => {
-      const freshNodes = forceRefresh();
-      const newNodeIndex = freshNodes.findIndex((n) => n.el === el);
-      const targetNode =
-        newNodeIndex >= 0 ? freshNodes[newNodeIndex] : freshNodes[index];
+    if (activatableRoles.has(role)) {
+      el.click();
 
-      if (targetNode) {
-        if (newNodeIndex >= 0) setIndex(newNodeIndex);
-        const liveNode: AccNode = {
-          ...targetNode,
-          states: computeStates(targetNode.el, targetNode.role),
-          value: computeValue(targetNode.el, targetNode.role),
-        };
-        narrate(formatAnnouncement(liveNode), handleLog);
-        document
-          .querySelectorAll(".srs-focus-ring")
-          .forEach((e) => e.classList.remove("srs-focus-ring"));
-        targetNode.el.classList.add("srs-focus-ring");
-      }
-    });
+      queueMicrotask(() => {
+        const freshNodes = forceRefresh();
+        const newNodeIndex = freshNodes.findIndex((n) => n.el === el);
+        const targetNode =
+          newNodeIndex >= 0 ? freshNodes[newNodeIndex] : freshNodes[index];
+
+        if (targetNode) {
+          if (newNodeIndex >= 0) setIndex(newNodeIndex);
+          const liveNode: AccNode = {
+            ...targetNode,
+            states: computeStates(targetNode.el, targetNode.role),
+            value: computeValue(targetNode.el, targetNode.role),
+          };
+          narrate(formatAnnouncement(liveNode), handleLog);
+          document
+            .querySelectorAll(".srs-focus-ring")
+            .forEach((e) => e.classList.remove("srs-focus-ring"));
+          targetNode.el.classList.add("srs-focus-ring");
+        }
+      });
+    }
   }, [enabled, nodes, index, narrate, handleLog, forceRefresh]);
 
   const escapeAction = useCallback(() => {
@@ -609,6 +622,11 @@ export function useScreenReaderCore({
     if (!keyboard || !enabled) return;
 
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Control") {
+        window.speechSynthesis.cancel();
+        return;
+      }
+
       if (
         !unlocked &&
         ["ArrowRight", "ArrowLeft", "h", "H", "Enter", " "].includes(e.key)
