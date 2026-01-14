@@ -1,4 +1,6 @@
 // src/content.tsx
+
+import { Analytics } from "@vercel/analytics/next";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ScreenReaderHUD } from "./components/ScreenReaderHUD";
@@ -27,6 +29,7 @@ if (!document.getElementById(HOST_ID)) {
   createRoot(root).render(
     <StrictMode>
       <ScreenReaderHUD />
+      <Analytics />
     </StrictMode>
   );
 }
