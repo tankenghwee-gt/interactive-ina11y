@@ -1,3 +1,6 @@
+/** biome-ignore-all lint/a11y/noStaticElementInteractions: A11y issues are intentional for this page */
+/** biome-ignore-all lint/a11y/useKeyWithClickEvents: A11y issues are intentional for this page */
+/** biome-ignore-all lint/a11y/useAltText: A11y issues are intentional for this page */
 import type { JSX } from "react";
 
 export default function Example(): JSX.Element {

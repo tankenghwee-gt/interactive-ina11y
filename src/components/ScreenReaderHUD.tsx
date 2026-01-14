@@ -1,28 +1,37 @@
 // src/components/ScreenReaderHUD.tsx
 
-import { type JSX, useState, useRef, useEffect, useCallback } from "react";
+import {
+  type JSX,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { HiEye, HiQuestionMarkCircle } from "react-icons/hi";
 import {
   HiEyeSlash,
-  HiXMark,
-  HiSpeakerXMark,
   HiSpeakerWave,
+  HiSpeakerXMark,
+  HiXMark,
 } from "react-icons/hi2";
 import { useScreenReaderCore } from "../hooks/useScreenReaderSimulator";
+import { useVisualViewport } from "../hooks/useVisualViewport";
 import { speak } from "../utils/utils";
 
 export function ScreenReaderHUD(): JSX.Element | null {
   const [hudOpen, setHudOpen] = useState(true);
   const [showHelp, setShowHelp] = useState(false); // Default closed on mobile
   const [curtainActive, setCurtainActive] = useState(true);
+  useVisualViewport();
 
   // Ref for the fixed container
   const containerRef = useRef<HTMLDivElement>(null);
-
   const {
     state: { muted, log },
     actions: { focusPrev, focusNext, activateOrFocus, escapeAction, setMuted },
   } = useScreenReaderCore({ lang: "en-US", enabled: hudOpen });
+
   const [width, setWidth] = useState<number>(window.innerWidth);
 
   const handleWindowSizeChange = useCallback(() => {
@@ -34,16 +43,64 @@ export function ScreenReaderHUD(): JSX.Element | null {
       window.removeEventListener("resize", handleWindowSizeChange);
     };
   }, [handleWindowSizeChange]);
+  const isMobile = typeof window !== "undefined" && width <= 768;
 
-  const isMobile = width <= 768;
+  useLayoutEffect(() => {
+    if (curtainActive && hudOpen) {
+      // Lock body to prevent background scrolling while curtain is active
+      const originalStyle = window.getComputedStyle(document.body).overflow;
+      document.body.style.overflow = "hidden";
+      document.body.style.position = "fixed";
+      document.body.style.width = "100%";
+      document.body.style.height = "100%"; // Use 100% instead of viewport units to prevent jumps
 
-  if (curtainActive) {
-    document.body.style.overflow = "hidden";
-    document.body.style.height = "100%";
-    document.body.style.margin = "0";
-  } else {
-    document.body.style.overflow = "auto";
-  }
+      return () => {
+        document.body.style.overflow = originalStyle;
+        document.body.style.position = "";
+        document.body.style.width = "";
+        document.body.style.height = "";
+      };
+    }
+  }, [curtainActive, hudOpen]);
+
+  const handleVisualResize = useCallback(() => {
+    if (!isMobile) return;
+    if (!containerRef.current) return;
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    // Math: The Layout Viewport is usually the window.innerHeight.
+    // The Visual Viewport (vv) shrinks when keyboard opens.
+    // We calculate the gap at the bottom.
+
+    // Note: We use window.innerHeight for consistency, but Math.max ensures
+    // we don't get negative values during elastic scrolling on iOS.
+    const layoutHeight = window.innerHeight;
+    const visualHeight = vv.height;
+    const visualTop = vv.offsetTop;
+    console.log(visualHeight);
+    console.log(window.outerHeight);
+
+    // Logic:
+    // On Android: layoutHeight shrinks with keyboard. Offset is ~0.
+    // On iOS: layoutHeight stays huge. visualHeight shrinks. Offset is > 0 (keyboard height).
+    // We also subtract visualTop to handle if the user has scrolled down (scrolled the visual viewport).
+
+    const offset = Math.max(0, layoutHeight - visualHeight - visualTop);
+
+    // Apply the offset to the bottom of the container
+    containerRef.current.style.bottom = `${offset}px`;
+  }, [isMobile]);
+
+  useEffect(() => {
+    window.visualViewport?.addEventListener("scroll", handleVisualResize);
+    window.visualViewport?.addEventListener("resize", handleVisualResize);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handleVisualResize);
+      window.visualViewport?.removeEventListener("scroll", handleVisualResize);
+    };
+  }, [handleVisualResize]);
 
   // === BEST PRACTICE: Dynamic Body Padding ===
   // This ensures the page content is never hidden behind the fixed HUD.
@@ -80,7 +137,6 @@ export function ScreenReaderHUD(): JSX.Element | null {
         onClick={() => setHudOpen(true)}
         className="srs-mobile-trigger"
         type="button"
-        aria-hidden="true"
       >
         Open Screen Reader
       </button>
@@ -120,6 +176,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
                 color: curtainActive ? "#7c3aed" : "#6b7280",
               }}
               title="Toggle Screen Curtain"
+              type="button"
             >
               {curtainActive ? <HiEyeSlash size={20} /> : <HiEye size={20} />}
             </button>
@@ -128,6 +185,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
               onClick={() => setShowHelp(!showHelp)}
               style={{ ...iconBtn, color: showHelp ? "#7c3aed" : "#6b7280" }}
               title="Keyboard Shortcuts"
+              type="button"
             >
               <HiQuestionMarkCircle size={20} />
             </button>
@@ -183,14 +241,14 @@ export function ScreenReaderHUD(): JSX.Element | null {
             onClick={focusNext}
           />
           <ControlButton
-            label="Select"
+            label="Edit/Select"
             sub={isMobile ? "Double Tap" : "Enter/Space"}
             onClick={activateOrFocus}
             highlight
           />
           <ControlButton
-            label="Stop"
-            sub={isMobile ? "Three Finger Tap" : "Esc"}
+            label="Stop Editing"
+            sub={isMobile ? "Tap Here" : "Esc"}
             onClick={escapeAction}
           />
         </div>
@@ -201,6 +259,9 @@ export function ScreenReaderHUD(): JSX.Element | null {
             Speech Output
           </strong>
           <button
+            onTouchEnd={(e) => {
+              e.target.dispatchEvent(new Event("click"));
+            }}
             onClick={() => {
               if (!muted) window.speechSynthesis?.cancel();
               else speak("Unmuted");
@@ -208,6 +269,7 @@ export function ScreenReaderHUD(): JSX.Element | null {
             }}
             aria-pressed={muted}
             className={`srs-mute-btn ${muted ? "is-muted" : ""}`}
+            type="button"
           >
             {muted ? <HiSpeakerXMark size={18} /> : <HiSpeakerWave size={18} />}
             <span className="srs-mute-label">
@@ -254,6 +316,7 @@ interface ControlButtonProps {
   onClick: () => void;
   disabled?: boolean;
   highlight?: boolean;
+  style?: React.CSSProperties;
 }
 
 function ControlButton({
@@ -262,12 +325,19 @@ function ControlButton({
   onClick,
   disabled,
   highlight,
+  style,
 }: ControlButtonProps) {
   const cls = `srs-btn ${highlight ? "srs-btn--primary" : ""} ${
     disabled ? "srs-btn--disabled" : ""
   }`;
   return (
-    <button className={cls} onClick={onClick} disabled={disabled} type="button">
+    <button
+      className={cls}
+      onClick={onClick}
+      disabled={disabled}
+      type="button"
+      style={style}
+    >
       <div>{label}</div>
       <div className="srs-sub" style={{ opacity: 0.7 }}>
         {sub}
@@ -295,8 +365,8 @@ const curtainStyle: React.CSSProperties = {
   position: "fixed",
   top: 0,
   left: 0,
-  width: "100vw",
-  height: "100vh",
+  width: "100%",
+  height: "100%",
   background: "#000",
   color: "#f3f4f6",
   zIndex: 2147483646,
@@ -356,11 +426,6 @@ const narrationBarStyle: React.CSSProperties = {
 
 const logContainerStyle: React.CSSProperties = {
   padding: "12px",
-  overflowY: "auto",
-  flex: 1,
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
   background: "#f9fafb",
   borderTop: "1px solid #e5e7eb",
 };

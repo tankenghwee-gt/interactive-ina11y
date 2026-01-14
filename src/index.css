@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-/* ... existing styles ... */
-
 .srs-mute-btn {
   display: flex;
   align-items: center;
@@ -98,6 +96,7 @@
 
 /* === NEW RESPONSIVE HUD STYLES === */
 .srs-hud-container {
+  height: "fit-content";
   position: fixed;
   z-index: 2147483647;
   background: #fff;

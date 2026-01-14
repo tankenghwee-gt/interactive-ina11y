@@ -1,4 +1,4 @@
-import { useRef, type JSX } from "react";
+import { type JSX, useRef } from "react";
 
 export default function ExampleFixed(): JSX.Element {
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -74,7 +74,7 @@ export default function ExampleFixed(): JSX.Element {
               />
             </div>
 
-            <aside className="psa" aria-label="">
+            <aside className="psa">
               <h2
                 style={{
                   margin: 0,

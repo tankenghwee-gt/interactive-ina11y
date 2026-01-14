@@ -1,7 +1,7 @@
 // src/utils/utils.ts
 import {
-  computeAccessibleName,
   computeAccessibleDescription,
+  computeAccessibleName,
   getRole as getSafeRole,
 } from "dom-accessibility-api";
 
@@ -20,6 +20,8 @@ export interface AccNode {
   coords?: { row: number; col: number };
 }
 
+let currentUtterance: SpeechSynthesisUtterance | null = null;
+
 export const speak = (
   text: string,
   opts?: {
@@ -31,6 +33,10 @@ export const speak = (
   }
 ): void => {
   if (!("speechSynthesis" in window)) return;
+
+  // 2. Clear any pending speech to prevent "queue jams"
+  if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+
   const {
     interrupt = true,
     rate = 1.0,
@@ -38,13 +44,28 @@ export const speak = (
     voice = null,
     onend,
   } = opts || {};
+
   if (interrupt) window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = rate;
-  u.pitch = pitch;
-  if (voice) u.voice = voice;
-  if (onend) u.onend = onend;
-  window.speechSynthesis.speak(u);
+
+  // 3. Assign to the GLOBAL variable so it stays alive
+  currentUtterance = new SpeechSynthesisUtterance(text);
+  currentUtterance.rate = rate;
+  currentUtterance.pitch = pitch;
+  if (voice) currentUtterance.voice = voice;
+
+  if (onend) {
+    currentUtterance.onend = () => {
+      onend();
+      // Optional: clear reference only after success
+      // currentUtterance = null;
+    };
+  }
+
+  currentUtterance.onerror = (e) => {
+    console.error("Speech Error:", e);
+  };
+
+  window.speechSynthesis.speak(currentUtterance);
 };
 
 // =============================

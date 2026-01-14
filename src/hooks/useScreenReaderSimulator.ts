@@ -1,13 +1,13 @@
 // src/hooks/useScreenReaderSimulator.ts
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ROLE_MAP } from "../utils/roleMap";
 import {
-  collectAccTree,
   type AccNode,
-  speak,
+  collectAccTree,
   computeStates,
   computeValue,
+  speak,
 } from "../utils/utils";
-import { ROLE_MAP } from "../utils/roleMap";
 
 // =========================================
 // 0. Configuration & Constants
@@ -178,6 +178,7 @@ function useSpeech(lang?: string) {
   const narrate = useCallback(
     (text: string, onLog?: (t: string) => void) => {
       onLog?.(text);
+      console.log("spekaing");
       if (unlocked && !muted) {
         speak(text, { voice: voice || undefined, interrupt: true });
       }
@@ -189,7 +190,7 @@ function useSpeech(lang?: string) {
 }
 
 // =========================================
-// 3. Sub-Hook: Tree & Live Regions
+// 3. Sub-Hook: Tree & Live Regions˚
 // =========================================
 
 function useLiveTree(enabled: boolean, onAlert: (text: string) => void) {
@@ -454,6 +455,50 @@ export function useScreenReaderCore({
   // -- Input Typing Echo --
   const typingDebounce = useRef<number | null>(null);
 
+  // 3. Debounced Value Announcement
+  const triggerValueAnnouncement = useCallback(
+    (el: HTMLElement, isPassword: boolean) => {
+      if (typingDebounce.current) clearTimeout(typingDebounce.current);
+      typingDebounce.current = window.setTimeout(() => {
+        if (isPassword) {
+          narrate("Password field, value hidden", handleLog);
+        } else {
+          const val = (el as HTMLInputElement).value || el.textContent || "";
+          narrate(`Value: ${val}`, handleLog);
+        }
+      }, 1000);
+    },
+    [handleLog, narrate]
+  );
+
+  const handleBeforeInput = useCallback(
+    (e: InputEvent) => {
+      const target = e.target as HTMLElement;
+      const isPassword =
+        target instanceof HTMLInputElement && target.type === "password";
+
+      // 1. Text Insertion (Typing)
+      if (e.inputType === "insertText" && e.data) {
+        // e.data contains the actual character being typed (e.g., "a", "€")
+        narrate(isPassword ? "star" : e.data, handleLog);
+        triggerValueAnnouncement(target, isPassword);
+      }
+
+      // 2. Deletion (Backspace)
+      if (e.inputType === "deleteContentBackward") {
+        narrate("Backspace", handleLog);
+        triggerValueAnnouncement(target, isPassword);
+      }
+
+      // 3. Enter Key (Mobile keyboards often send this as insertLineBreak)
+      if (e.inputType === "insertLineBreak") {
+        // You might want to map this to your 'activateOrFocus' logic
+        activateOrFocus();
+      }
+    },
+    [narrate, handleLog, triggerValueAnnouncement, activateOrFocus]
+  );
+
   const handleTyping = useCallback(
     (e: KeyboardEvent, el: HTMLElement) => {
       // Determine input type
@@ -461,8 +506,6 @@ export function useScreenReaderCore({
         el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
       const isPassword =
         el instanceof HTMLInputElement && el.type === "password";
-
-      let shouldAnnounceValue = false; // Only announce full value on changes
 
       // 1. Navigation & Deletion Feedback
       if (isInput) {
@@ -478,7 +521,7 @@ export function useScreenReaderCore({
           } else {
             narrate("Backspace", handleLog);
           }
-          shouldAnnounceValue = true; // Content changed
+          triggerValueAnnouncement(el, isPassword);
         } else if (e.key === "ArrowLeft") {
           if (idx > 0) {
             const char = val[idx - 1];
@@ -495,7 +538,7 @@ export function useScreenReaderCore({
           } else {
             narrate("Delete", handleLog);
           }
-          shouldAnnounceValue = true; // Content changed
+          triggerValueAnnouncement(el, isPassword);
         } else if (e.key === "ArrowRight") {
           if (idx < val.length) {
             const char = val[idx];
@@ -504,33 +547,8 @@ export function useScreenReaderCore({
           // Navigation only - do not announce full value
         }
       }
-
-      // 2. Typing Echo (Alphanumeric)
-      const isPrintable =
-        e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
-
-      if (isPrintable) {
-        narrate(
-          isPassword ? "star" : e.key === " " ? "space" : e.key,
-          handleLog
-        );
-        shouldAnnounceValue = true;
-      }
-
-      // 3. Debounced Value Announcement
-      if (shouldAnnounceValue) {
-        if (typingDebounce.current) clearTimeout(typingDebounce.current);
-        typingDebounce.current = window.setTimeout(() => {
-          if (isPassword) {
-            narrate("Password field, value hidden", handleLog);
-          } else {
-            const val = (el as HTMLInputElement).value || el.textContent || "";
-            narrate(`Value: ${val}`, handleLog);
-          }
-        }, 1000);
-      }
     },
-    [narrate, handleLog]
+    [triggerValueAnnouncement, narrate, handleLog]
   );
 
   // -- Mobile Gestures (Touch) --
@@ -545,10 +563,16 @@ export function useScreenReaderCore({
     let touchStartY = 0;
     let isTwoFinger = false;
     let isThreeFinger = false;
-    let timeout: number;
+    let timeout: ReturnType<typeof setTimeout>;
     let lastTap = 0;
 
     const handleTouchStart = (e: TouchEvent) => {
+      const srsHUDContainer =
+        document.getElementsByClassName("srs-hud-container")[0];
+      if (e.cancelable && !srsHUDContainer.contains(e.target as Node)) {
+        e.preventDefault();
+      }
+
       if (e.touches.length === 2) {
         isTwoFinger = true;
       } else {
@@ -657,7 +681,7 @@ export function useScreenReaderCore({
       document.removeEventListener("touchstart", handleTouchStart);
       document.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [enabled, index, focusAt, seek, narrate, handleLog]);
+  }, [enabled, index, focusAt, activateOrFocus]);
 
   // -- Keyboard Listener --
   useEffect(() => {
@@ -769,8 +793,16 @@ export function useScreenReaderCore({
     };
 
     window.addEventListener("keydown", onKey, { capture: true });
-    return () =>
+    window.addEventListener("beforeinput", handleBeforeInput, {
+      capture: true,
+      passive: false,
+    });
+    return () => {
       window.removeEventListener("keydown", onKey, { capture: true });
+      window.removeEventListener("beforeinput", handleBeforeInput, {
+        capture: true,
+      });
+    };
   }, [
     keyboard,
     enabled,
@@ -783,6 +815,7 @@ export function useScreenReaderCore({
     escapeAction,
     handleTyping,
     setUnlocked,
+    handleBeforeInput,
   ]);
 
   // -- Native Focus Sync --
